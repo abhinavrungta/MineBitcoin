@@ -1,5 +1,3 @@
-package main
-
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
@@ -7,14 +5,15 @@ import akka.actor.Props
 import akka.event.LoggingReceive
 import scala.util.control.Breaks
 import java.security.MessageDigest
+import akka.actor.actorRef2Scala
 
 object Project1 {
   def main(args: Array[String]) {
     var noOfActors = 5 // no of Worker Actors to create on invoking the program.
-    var leadingZeros = 3
+    var leadingZeros = 4
     var ipAddress = ""
     var blockSize = 10000
-    var threshold = 100000
+    var threshold = 1000000
 
     // exit if argument not passed as command line param
     if (args.length < 1) {
@@ -31,7 +30,7 @@ object Project1 {
       }
     }
     val system = ActorSystem("BitCoinSystem")
-    val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold))
+    val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold), name = "Master")
     master ! Master.StartMining
 
   }
@@ -55,30 +54,11 @@ object Project1 {
   }
 
   object SHA256 {
-    private val sha = MessageDigest.getInstance("SHA-256")
+
     def hash(str: String): String = {
-      //val hexString = new StringBuffer()
-      try {
-
-        sha.digest(str.getBytes).foldLeft("")((s: String, b: Byte) => s +
-          Character.forDigit((b & 0xf0) >> 4, 16) +
-          Character.forDigit(b & 0x0f, 16))
-
-        /*        val mdbytes = sha.digest(s.getBytes)
-
-        var i = 0
-        for (i <- 0 until mdbytes.length) {
-          hexString.append(java.lang.Integer.toHexString(0xFF & mdbytes(i)))
-        }
-        hexString.toString()
-        * 
-        */
-      } catch {
-        case e: Exception =>
-          println("exception in SHA256: " + str + "   :   " + sha.digest(str.getBytes()).toString)
-          //println(e.getStackTrace())
-          str
-      }
+      MessageDigest.getInstance("SHA-256").digest(str.getBytes).foldLeft("")((s: String, b: Byte) => s +
+        Character.forDigit((b & 0xf0) >> 4, 16) +
+        Character.forDigit(b & 0x0f, 16))
     }
   }
 
@@ -156,7 +136,7 @@ object Project1 {
     def receive = LoggingReceive {
       case ValidBitCoin(inputStr: String, outputStr: String) =>
         results += (inputStr -> outputStr)
-        println(inputStr + "\t\t" + outputStr)
+        println(inputStr + "\t" + outputStr)
 
       case Worker.Done =>
         if (inputCtr < threshold) {
@@ -182,7 +162,7 @@ object Project1 {
     def startMiningImpl() {
       var i = 1
       for (i <- 1 to noOfActors) {
-        actorPool(i - 1) = context.actorOf(Props(classOf[Worker], leadingZeros))
+        actorPool(i - 1) = context.actorOf(Props(classOf[Worker], leadingZeros), name = "Worker" + i)
       }
       for (i <- 1 to noOfActors) {
         actorPool(i - 1) ! Worker.Compute(currentInputString, blockSize)
