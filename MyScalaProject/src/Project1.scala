@@ -5,29 +5,32 @@ import akka.actor.Props
 import akka.event.LoggingReceive
 import scala.util.control.Breaks
 import java.security.MessageDigest
-import akka.actor.actorRef2Scala
 
 object Project1 {
   def main(args: Array[String]) {
-    var noOfActors = 5 // no of Worker Actors to create on invoking the program.
+    var noOfActors = 10 // no of Worker Actors to create on invoking the program.
     var leadingZeros = 4
     var ipAddress = ""
     var blockSize = 10000
     var threshold = 1000000
 
     // exit if argument not passed as command line param
-    if (args.length < 1) {
+    if (args.length < 4) {
       println("Invalid no of args")
       System.exit(1)
     } // check if argument passed is the ipAddress or the LeadingZero
     else {
-      args(0) match {
-        case s: String if s.contains(".") =>
-          ipAddress = s
-        case s: String =>
-          leadingZeros = s.toInt
-        case _ => System.exit(1)
-      }
+      leadingZeros = args(0).toInt
+      noOfActors = args(1).toInt
+      blockSize = args(2).toInt
+      threshold = args(3).toInt
+      //      args(0) match {
+      //        case s: String if s.contains(".") =>
+      //          ipAddress = s
+      //        case s: String =>
+      //          leadingZeros = s.toInt
+      //        case _ => System.exit(1)
+      //      }
     }
     val system = ActorSystem("BitCoinSystem")
     val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold), name = "Master")
@@ -122,6 +125,7 @@ object Project1 {
     case class ValidBitCoin(inputStr: String, outputStr: String)
     case object StartMining
     case object Stop
+    case object NewRemoteWorker
   }
 
   class Master(leadingZeros: Int, blockSize: Int, noOfActors: Int, threshold: Int) extends Actor {
@@ -131,7 +135,7 @@ object Project1 {
     var actorPool = new Array[ActorRef](noOfActors)
     var inputCtr = 0
     var stoppedActors = 0
-    var startTime: Long = System.currentTimeMillis()
+    var actors = noOfActors
 
     def receive = LoggingReceive {
       case ValidBitCoin(inputStr: String, outputStr: String) =>
@@ -149,12 +153,19 @@ object Project1 {
 
       case Worker.StopAck =>
         stoppedActors += 1
-        if (stoppedActors == noOfActors) {
-          var duration: Long = System.currentTimeMillis() - startTime
-          println("Time in ms : " + duration)
-          context.stop(self)
+        if (stoppedActors == actors) {
           context.system.shutdown
         }
+
+      case NewRemoteWorker =>
+        if (inputCtr < threshold) {
+          actors += 1
+          sender ! Worker.Compute(currentInputString, blockSize)
+          currentInputString = StringIncrementer.incrementByN(currentInputString, blockSize)
+          inputCtr += blockSize
+        } else
+          sender ! Worker.Stop
+
       case _ =>
         println("FAILED IN MASTER RECV.")
     }
