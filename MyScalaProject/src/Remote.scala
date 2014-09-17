@@ -4,11 +4,13 @@ import Project1.Master
 import akka.actor.ActorSystem
 import akka.actor.Props
 import Project1.Worker
+import com.typesafe.config.ConfigFactory
 
 object Remote {
   def main(args: Array[String]) {
     var leadingZeros = 4
     var ipAddress = ""
+    var port = 10000
 
     if (args.length < 1) {
       println("Invalid no of args")
@@ -22,10 +24,23 @@ object Remote {
         case _ => System.exit(1)
       }
     }
-    val system = ActorSystem("RemoteBitCoinSystem")
+    var config = ConfigFactory.parseString("""
+    akka {
+    actor {
+      provider = "akka.remote.RemoteActorRefProvider"
+    }
+    remote {
+      transport = "akka.remote.netty.NettyRemoteTransport"
+      netty {
+        hostname = "localhost"
+        port = """ + port + """
+      }
+    }
+  }""")
+    val system = ActorSystem("RemoteBitCoinSystem", ConfigFactory.load(config))
     val worker = system.actorOf(Props(classOf[Worker], leadingZeros), name = "Worker")
 
-    val master = system.actorSelection("akka://BitCoinSystem@127.0.0.1:2552/user/Master")
+    val master = system.actorSelection("akka.tcp://BitCoinSystem@" + ipAddress + ":12000/user/Master")
     master ! Master.NewRemoteWorker
 
   }

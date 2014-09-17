@@ -5,6 +5,7 @@ import akka.actor.Props
 import akka.event.LoggingReceive
 import scala.util.control.Breaks
 import java.security.MessageDigest
+import com.typesafe.config.ConfigFactory
 
 object Project1 {
   def main(args: Array[String]) {
@@ -13,6 +14,7 @@ object Project1 {
     var ipAddress = ""
     var blockSize = 10000
     var threshold = 1000000
+    var port = 12000
 
     // exit if argument not passed as command line param
     if (args.length < 4) {
@@ -32,7 +34,22 @@ object Project1 {
       //        case _ => System.exit(1)
       //      }
     }
-    val system = ActorSystem("BitCoinSystem")
+
+    var config = ConfigFactory.parseString("""
+    akka {
+    actor {
+      provider = "akka.remote.RemoteActorRefProvider"
+    }
+    remote {
+      transport = "akka.remote.netty.NettyRemoteTransport"
+      netty {
+        hostname = "localhost"
+        port = """ + port + """
+      }
+    }
+  }""")
+
+    val system = ActorSystem("BitCoinSystem", ConfigFactory.load(config))
     val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold), name = "Master")
     master ! Master.StartMining
 
