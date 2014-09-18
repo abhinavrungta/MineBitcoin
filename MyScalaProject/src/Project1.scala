@@ -6,6 +6,9 @@ import akka.event.LoggingReceive
 import scala.util.control.Breaks
 import java.security.MessageDigest
 import com.typesafe.config.ConfigFactory
+import com.typesafe.config.Config
+import scala.collection.mutable.ArrayBuffer
+import akka.actor.Terminated
 
 object Project1 {
   def main(args: Array[String]) {
@@ -14,28 +17,7 @@ object Project1 {
     var ipAddress = ""
     var blockSize = 10000
     var threshold = 1000000
-    var port = 12000
-
-    // exit if argument not passed as command line param
-    if (args.length < 4) {
-      println("Invalid no of args")
-      System.exit(1)
-    } // check if argument passed is the ipAddress or the LeadingZero
-    else {
-      leadingZeros = args(0).toInt
-      noOfActors = args(1).toInt
-      blockSize = args(2).toInt
-      threshold = args(3).toInt
-      //      args(0) match {
-      //        case s: String if s.contains(".") =>
-      //          ipAddress = s
-      //        case s: String =>
-      //          leadingZeros = s.toInt
-      //        case _ => System.exit(1)
-      //      }
-    }
-
-    var config = ConfigFactory.parseString("""
+    var myConfig = ConfigFactory.parseString("""
     akka {
     actor {
       provider = "akka.remote.RemoteActorRefProvider"
@@ -44,15 +26,70 @@ object Project1 {
       transport = "akka.remote.netty.NettyRemoteTransport"
       netty {
         hostname = "localhost"
-        port = """ + port + """
+        port = 12000
       }
     }
   }""")
 
-    val system = ActorSystem("BitCoinSystem", ConfigFactory.load(config))
-    val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold), name = "Master")
-    master ! Master.StartMining
+    // exit if argument not passed as command line param
+    if (args.length < 1) {
+      println("Invalid no of args")
+      System.exit(1)
+    } else if (args.length == 4) {
+      leadingZeros = args(0).toInt
+      noOfActors = args(1).toInt
+      blockSize = args(2).toInt
+      threshold = args(3).toInt
 
+      val system = ActorSystem.create("BitCoinSystem", ConfigFactory.load(myConfig))
+      val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold), name = "Master")
+      master.tell(Master.StartMining, master)
+
+    } // check if argument passed is the ipAddress or the LeadingZero
+    else {
+      args(0) match {
+        case s: String if s.contains(".") =>
+          ipAddress = s
+          val remoteSystem = ActorSystem("RemoteBitCoinSystem", ConfigFactory.load(myConfig))
+          val worker = remoteSystem.actorOf(Props(classOf[Worker]), name = "Worker")
+          val watcher = remoteSystem.actorOf(Props(classOf[Watcher]), name = "Watcher")
+
+          watcher ! Watcher.WatchMe(worker)
+
+          val master = remoteSystem.actorSelection("akka.tcp://BitCoinSystem@" + ipAddress + ":2552/user/Master")
+          master.tell(Master.NewRemoteWorker, worker)
+
+        case s: String =>
+          leadingZeros = s.toInt
+        case _ => System.exit(1)
+      }
+    }
+
+  }
+
+  object Watcher {
+    // Used by others to register an Actor for watching
+    case class WatchMe(ref: ActorRef)
+  }
+
+  class Watcher extends Actor {
+    import Watcher._
+
+    // Keep track of what we're watching
+    val watched = ArrayBuffer.empty[ActorRef]
+
+    // Watch and check for termination
+    final def receive = {
+      case WatchMe(ref) =>
+        context.watch(ref)
+        watched += ref
+      case Terminated(ref) =>
+        watched -= ref
+        if (watched.isEmpty) {
+          println("Shutdown by watcher")
+          context.system.shutdown
+        }
+    }
   }
 
   object StringIncrementer {
@@ -83,21 +120,22 @@ object Project1 {
   }
 
   object Worker {
-    case class Compute(str: String, ctr: Int)
+    case class Compute(str: String, ctr: Int, zeros: Int)
     case object Done
     case object Failed
     case object Stop
     case object StopAck
   }
 
-  class Worker(leadingZeros: Int) extends Actor {
+  class Worker() extends Actor {
     import Worker._
     var tempStartString = ""
     private val prefix = "asrivastava"
+    println("Local Workers PAth:" + context.self.path)
 
     def receive = LoggingReceive {
-      case Compute(str, ctr) =>
-        ComputeImpl(str, ctr, sender)
+      case Compute(str, ctr, zeros) =>
+        ComputeImpl(str, ctr, zeros, sender)
         sender ! Done
       case Stop =>
         sender ! StopAck
@@ -105,12 +143,12 @@ object Project1 {
       case _ => sender ! Failed
     }
 
-    def ComputeImpl(str: String, ctr: Int, sender: ActorRef) {
+    def ComputeImpl(str: String, ctr: Int, zeros: Int, sender: ActorRef) {
       var i = 1
       tempStartString = str
       for (i <- 1 to ctr) {
         var hex = SHA256.hash(prefix + tempStartString)
-        var result = checkLeadingZeros(hex, leadingZeros)
+        var result = checkLeadingZeros(hex, zeros)
         if (result) {
           sender ! Master.ValidBitCoin(prefix + tempStartString, hex)
         }
@@ -153,6 +191,7 @@ object Project1 {
     var inputCtr = 0
     var stoppedActors = 0
     var actors = noOfActors
+    println("Master PAth:" + context.self.path)
 
     def receive = LoggingReceive {
       case ValidBitCoin(inputStr: String, outputStr: String) =>
@@ -161,28 +200,33 @@ object Project1 {
 
       case Worker.Done =>
         if (inputCtr < threshold) {
-          sender ! Worker.Compute(currentInputString, blockSize)
+          sender ! Worker.Compute(currentInputString, blockSize, leadingZeros)
           currentInputString = StringIncrementer.incrementByN(currentInputString, blockSize)
           inputCtr += blockSize
-        } else
+        } else {
+          println("Sending Stop to " + sender.path)
           sender ! Worker.Stop
+        }
       case StartMining => startMiningImpl()
 
       case Worker.StopAck =>
         stoppedActors += 1
         if (stoppedActors == actors) {
+          println("Stopping after " + actors + " actors have stopped")
           context.system.shutdown
         }
 
-      case NewRemoteWorker =>
+      case "NewRemoteWorker" =>
+        println("recv remote:" + sender.path)
         if (inputCtr < threshold) {
           actors += 1
-          sender ! Worker.Compute(currentInputString, blockSize)
+          sender ! Worker.Compute(currentInputString, blockSize, leadingZeros)
           currentInputString = StringIncrementer.incrementByN(currentInputString, blockSize)
           inputCtr += blockSize
-        } else
+        } else {
+          println("Sending Stop to Remote")
           sender ! Worker.Stop
-
+        }
       case _ =>
         println("FAILED IN MASTER RECV.")
     }
@@ -190,10 +234,10 @@ object Project1 {
     def startMiningImpl() {
       var i = 1
       for (i <- 1 to noOfActors) {
-        actorPool(i - 1) = context.actorOf(Props(classOf[Worker], leadingZeros), name = "Worker" + i)
+        actorPool(i - 1) = context.actorOf(Props(classOf[Worker]), name = "Worker" + i)
       }
       for (i <- 1 to noOfActors) {
-        actorPool(i - 1) ! Worker.Compute(currentInputString, blockSize)
+        actorPool(i - 1) ! Worker.Compute(currentInputString, blockSize, leadingZeros)
         currentInputString = StringIncrementer.incrementByN(currentInputString, blockSize)
         inputCtr += blockSize
       }

@@ -5,6 +5,8 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 import Project1.Worker
 import com.typesafe.config.ConfigFactory
+import scala.collection.mutable.ArrayBuffer
+import akka.actor.Terminated
 
 object Remote {
   def main(args: Array[String]) {
@@ -39,10 +41,38 @@ object Remote {
   }""")
     val system = ActorSystem("RemoteBitCoinSystem", ConfigFactory.load(config))
     val worker = system.actorOf(Props(classOf[Worker], leadingZeros), name = "Worker")
+    val watcher = system.actorOf(Props(classOf[Watcher]), name = "Watcher")
+
+    watcher ! Watcher.WatchMe(worker)
 
     val master = system.actorSelection("akka.tcp://BitCoinSystem@" + ipAddress + ":12000/user/Master")
-    master ! Master.NewRemoteWorker
+    master.tell(Master.NewRemoteWorker, worker)
 
+  }
+
+  object Watcher {
+    // Used by others to register an Actor for watching
+    case class WatchMe(ref: ActorRef)
+  }
+
+  class Watcher extends Actor {
+    import Watcher._
+
+    // Keep track of what we're watching
+    val watched = ArrayBuffer.empty[ActorRef]
+
+    // Watch and check for termination
+    final def receive = {
+      case WatchMe(ref) =>
+        context.watch(ref)
+        watched += ref
+      case Terminated(ref) =>
+        watched -= ref
+        if (watched.isEmpty) {
+          println("Shutdown by watcher")
+          context.system.shutdown
+        }
+    }
   }
 
 }
