@@ -11,39 +11,17 @@ import akka.actor.Terminated
 
 object Project1 {
   def main(args: Array[String]) {
-    var noOfActors = 5 // no of Worker Actors to create on invoking the program.
+    var noOfActors = 10 // no of Worker Actors to create on invoking the program.
     var leadingZeros = 4
     var ipAddress = ""
-    var blockSize = 10000
-    var threshold = 1000000
+    var blockSize = 100000
+    var threshold = 10000000
 
     // exit if argument not passed as command line param
     if (args.length < 1) {
       println("Invalid no of args")
       System.exit(1)
-    } else if (args.length == 4) {
-      leadingZeros = args(0).toInt
-      noOfActors = args(1).toInt
-      blockSize = args(2).toInt
-      threshold = args(3).toInt
-
-      val system = ActorSystem.create("BitCoinSystem", ConfigFactory.load(ConfigFactory.parseString("""
-    akka {
-  actor {
-    provider = "akka.remote.RemoteActorRefProvider"
-  }
-  remote {
-    enabled-transports = ["akka.remote.netty.tcp"]
-    netty.tcp {
-      port = 12000
-    }
- }
-}""")))
-      val master = system.actorOf(Props(classOf[Master], leadingZeros, blockSize, noOfActors, threshold), name = "Master")
-      master.tell(Master.StartMining, master)
-
-    } // check if argument passed is the ipAddress or the LeadingZero
-    else {
+    } else if (args.length == 1) {
       args(0) match {
         case s: String if s.contains(".") =>
           ipAddress = s
@@ -59,8 +37,8 @@ object Project1 {
     }
  }
 }""")))
-          val worker = remoteSystem.actorOf(Props(classOf[Worker]), name = "Worker")
-          val watcher = remoteSystem.actorOf(Props(classOf[Watcher]), name = "Watcher")
+          val worker = remoteSystem.actorOf(Props(new Worker()), name = "Worker")
+          val watcher = remoteSystem.actorOf(Props(new Watcher()), name = "Watcher")
 
           watcher ! Watcher.WatchMe(worker)
 
@@ -69,6 +47,11 @@ object Project1 {
 
         case s: String =>
           leadingZeros = s.toInt
+
+          val system = ActorSystem.create("BitCoinSystem", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 12000 } } } } } """)))
+          val master = system.actorOf(Props(new Master(leadingZeros, blockSize, noOfActors, threshold)), name = "Master")
+          master.tell(Master.StartMining, master)
+
         case _ => System.exit(1)
       }
     }
