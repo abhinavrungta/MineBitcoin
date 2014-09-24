@@ -25,18 +25,7 @@ object Project1 {
       args(0) match {
         case s: String if s.contains(".") =>
           ipAddress = s
-          val remoteSystem = ActorSystem("RemoteBitCoinSystem", ConfigFactory.load(ConfigFactory.parseString("""
-    akka {
-  actor {
-    provider = "akka.remote.RemoteActorRefProvider"
-  }
-  remote {
-    enabled-transports = ["akka.remote.netty.tcp"]
-    netty.tcp {
-      port = 13000
-    }
- }
-}""")))
+          val remoteSystem = ActorSystem("RemoteBitCoinSystem", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 } } } } } """)))
           val worker = remoteSystem.actorOf(Props(new Worker()), name = "Worker")
           val watcher = remoteSystem.actorOf(Props(new Watcher()), name = "Watcher")
 
@@ -86,7 +75,7 @@ object Project1 {
     def next(s: String): String = {
       val length = s.length
       var c = s.charAt(length - 1)
-      if (c == 'z' || c == 'Z') return if (length > 1) next(s.substring(0, length - 1)) + 'A' else "AA"
+      if (c == 'Z') return if (length > 1) next(s.substring(0, length - 1)) + 'A' else "AA"
       s.substring(0, length - 1) + (c.toInt + 1).toChar
     }
 
