@@ -12,6 +12,7 @@ import akka.event.LoggingReceive
 
 object Project2 {
   val nodesArr = ArrayBuffer.empty[ActorRef]
+  var noOfStoppedNodes = 0
   var noOfNodes = 10 // no of Actors to create on invoking the program.
   var topology = "" // Type of Topology
   var algorithm = "" // Type of Protocol
@@ -43,13 +44,8 @@ object Project2 {
 
       // create array of all nodes (actors)
       for (i <- 0 to noOfNodes - 1) {
-        var node = ActorRef.noSender
-        // if algorithm type is push sum, use a certain type of object
-        if (algorithm == "push-sum") {
-          node = system.actorOf(Props(new PushSumWorker()), name = "Worker" + i)
-        } else {
-          node = system.actorOf(Props(new GossipWorker()), name = "Worker" + i)
-        }
+        var node = system.actorOf(Props(new GossipWorker(topology, algorithm)), name = "Worker" + i)
+        node ! "init"
         nodesArr += node
         watcher ! Watcher.WatchMe(node)
       }
@@ -57,24 +53,19 @@ object Project2 {
       // send list of neighbors to all nodes (actors) 
       for (i <- 0 to noOfNodes - 1) {
         var neighbours = ArrayBuffer.empty[ActorRef]
-        if (topology == "full") {
-          neighbours = getFullNetworkNodes(i)
-        } else if (topology == "2D") {
+        if (topology == "2D") {
           neighbours = get2DNodes(i)
         } else if (topology == "line") {
           neighbours = getLineNodes(i)
         } else if (topology == "imp2D") {
           neighbours = getImp2DNodes(i)
+          // the last element in the array is the random guy. Send this guy the inward bound reference.
+          var randomNeighbour = neighbours.last
+          randomNeighbour ! GossipWorker.RandomGuy(nodesArr(i))
         }
         nodesArr(i) ! GossipWorker.AddNeighbour(neighbours)
       }
     }
-  }
-
-  def getFullNetworkNodes(nodeNo: Int): ArrayBuffer[ActorRef] = {
-    val arr = nodesArr.clone()
-    arr.remove(nodeNo)
-    return arr
   }
 
   def getLineNodes(nodeNo: Int): ArrayBuffer[ActorRef] = {
@@ -133,7 +124,6 @@ object Project2 {
 
   class Watcher extends Actor {
     import Watcher._
-
     // Keep track of what we're watching
     val watched = ArrayBuffer.empty[ActorRef]
 
@@ -144,6 +134,8 @@ object Project2 {
         watched += ref
       case Terminated(ref) =>
         watched -= ref
+        nodesArr -= ref
+        noOfStoppedNodes += 1
         if (watched.isEmpty) {
           context.system.shutdown
         }
@@ -153,31 +145,73 @@ object Project2 {
   object GossipWorker {
     case class AddNeighbour(arr: ArrayBuffer[ActorRef])
     case class RemoveNeighbour(arr: ArrayBuffer[ActorRef])
-    case object Done
+    case class RandomGuy(randomGuy: ActorRef)
     case object Failed
-    case object Stop
-    case object StopAck
+    case object Stopping
   }
 
-  class GossipWorker() extends Actor {
+  class GossipWorker(topology: String, algorithm: String) extends Actor {
+    import context._
+    import GossipWorker._
     var neighbors = ArrayBuffer.empty[ActorRef]
+    var randomInwardGuy: ActorRef = null
+    var selfIndex = self.path.name.drop(6).toInt
+
+    def gossipFullNetwork: Receive = {
+      case "" => stop(self)
+      case "" => getRandom()
+      case _ => sender ! Failed
+    }
+
+    def pushSumFullNetwork: Receive = {
+      case "" =>
+      case _ => sender ! Failed
+    }
+
+    def getRandom(): AnyRef = {
+      var tmp = 0
+      var ctr = 0
+      do {
+        tmp = rand.nextInt(nodesArr.length)
+        ctr += 1
+      } while (tmp != selfIndex && ctr < 5)
+      return nodesArr(tmp)
+    }
+    def gossipNetwork: Receive = {
+      case AddNeighbour(arr) =>
+        neighbors ++= arr
+      case RemoveNeighbour(arr) =>
+        neighbors --= arr
+      case RandomGuy(randomGuy) => randomInwardGuy = randomGuy
+      case _ => sender ! Failed
+    }
+
+    def pushSumNetwork: Receive = {
+      case AddNeighbour(arr) =>
+        neighbors ++= arr
+      case RemoveNeighbour(arr) =>
+        neighbors --= arr
+      case RandomGuy(randomGuy) => randomInwardGuy = randomGuy
+      case _ => sender ! Failed
+    }
+
     def receive = LoggingReceive {
-      case GossipWorker.AddNeighbour(arr) =>
-        neighbors ++= arr
-      case GossipWorker.Stop =>
-        sender ! GossipWorker.StopAck
-        context.stop(self)
-      case _ => sender ! GossipWorker.Failed
+      case "init" =>
+        // if algorithm type is push sum, use a certain type of object
+        if (topology == "full") {
+          if (algorithm == "push-sum") {
+            become(pushSumFullNetwork)
+          } else {
+            become(gossipFullNetwork)
+          }
+        } else {
+          if (algorithm == "push-sum") {
+            become(pushSumNetwork)
+          } else {
+            become(gossipNetwork)
+          }
+        }
+      case _ => println("FAILED")
     }
   }
-
-  class PushSumWorker() extends GossipWorker {
-
-    override def receive = LoggingReceive {
-      case GossipWorker.AddNeighbour(arr) =>
-        neighbors ++= arr
-      case _ => sender ! GossipWorker.Failed
-    }
-  }
-
 }
