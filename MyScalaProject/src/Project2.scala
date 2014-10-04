@@ -1,23 +1,18 @@
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.Await
-import scala.concurrent.duration.DurationInt
 import scala.util.Random
+
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
-import akka.actor.Terminated
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import akka.pattern.ask
-import akka.util.Timeout
-import com.typesafe.config.ConfigFactory
 
 // Think of tracking the messages being recd by the actors and shutdown entire system when recd atleast once.
 
 object Project2 {
   def main(args: Array[String]) {
-    // exit if argument not passed as command line param
+    // exit if arguments not passed as command line param.
     if (args.length < 3) {
       println("INVALID NO OF ARGS.  USAGE :")
       println("1. Number of Nodes")
@@ -29,7 +24,7 @@ object Project2 {
       var topo = args(1)
       var algo = args(2)
 
-      // convert no of nodes into Perfect Square if topology is 2D or imp2D
+      // convert no. of nodes into Perfect Square if topology is 2D or imp2D
       if (topo == "2D" || topo == "imp2D") {
         var tmp = Math.sqrt(numNodes.toDouble).ceil
         tmp = tmp * tmp
@@ -37,20 +32,18 @@ object Project2 {
       }
 
       // create actor system and a watcher actor
-
-      val system = ActorSystem("Gossip", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "log-dead-letters" : 1000 } } """)))
+      val system = ActorSystem("Gossip")
       val watcher = system.actorOf(Props(new Watcher(numNodes, topo, algo)), name = "Watcher")
       watcher ! Watcher.Initiate
     }
   }
 
   object Watcher {
-    // Used by others to register an Actor for watching
     case class Terminate(ref: ActorRef)
     case object Initiate
     case object GetRandomNode
-    case class ReInstate(s: Double, w: Double)
-    case object ReinstateGossip
+    case class ReInitiate(s: Double, w: Double)
+    case object ReinitiateGossip
   }
 
   class Watcher(noOfNodes: Int, topology: String, algorithm: String) extends Actor {
@@ -58,7 +51,7 @@ object Project2 {
     import context._
     var startTime = System.currentTimeMillis()
 
-    // keep track of what we have created and are watching.
+    // keep track of actors and their neighbors.
     val nodesArr = ArrayBuffer.empty[ActorRef]
     val neighborArr = ArrayBuffer.empty[ArrayBuffer[ActorRef]]
     val rand = new Random(System.currentTimeMillis())
@@ -70,6 +63,7 @@ object Project2 {
       nodesArr += node
     }
 
+    // For anything apart from a full n/w, compute neighbors and store them.
     for (i <- 0 to noOfNodes - 1) {
       var neighbours = ArrayBuffer.empty[ActorRef]
       if (topology == "2D") {
@@ -83,27 +77,34 @@ object Project2 {
     }
     // end of constructor
 
+    // find and return a valid neighbor when requested by a node, otherwise stop the actor.
     def getNode(ref: ActorRef): Unit = topology match {
       case "full" => getRandomNode(ref)
       case "2D" | "line" | "imp2D" =>
-        var index = ref.path.name.drop(6).toInt
-        var tmp = neighborArr(index)
-        var found = false
+        var index = ref.path.name.drop(6).toInt // get index from name. 2 in case of Worker2
+        var tmp = neighborArr(index) // retrieve its list of neighbors.
+        var neighborFound = false
 
-        while (!tmp.isEmpty && !found) {
+        // loop until neighbor is found or there are no more neighbors left.
+        while (!tmp.isEmpty && !neighborFound) {
           var result = tmp(rand.nextInt(tmp.length))
+          // check if the neighbor is not shutdown. If not, send a message to the requester with the neighbor ref.
           if (nodesArr.contains(result)) {
-            found = true
+            neighborFound = true
             ref ! GossipWorker.GossipNode(result)
+            // otherwise, remove node from neighbor list.
           } else {
             tmp -= result
           }
         }
-        if (!found) {
+
+        // if the neighbor was not found, ask the requester to stop, as he cannot send any more messages.
+        if (!neighborFound) {
           ref ! GossipWorker.Stop
         }
     }
 
+    // Get valid neighbors in a Line n/w Topology for a given node no.
     def getLineNodes(nodeNo: Int): ArrayBuffer[ActorRef] = {
       val arr = ArrayBuffer.empty[ActorRef]
       if (nodeNo == 0)
@@ -117,6 +118,7 @@ object Project2 {
       return arr
     }
 
+    // Get valid neighbors in a 2D n/w Topology for a given node no.
     def get2DNodes(nodeNo: Int): ArrayBuffer[ActorRef] = {
       val arr = ArrayBuffer.empty[ActorRef]
       val size = Math.sqrt(noOfNodes.toDouble).toInt
@@ -140,11 +142,13 @@ object Project2 {
       return arr
     }
 
+    // Get valid neighbors in an imperfect 2D n/w Topology for a given node no.
     def getImp2DNodes(nodeNo: Int): ArrayBuffer[ActorRef] = {
       val arr = get2DNodes(nodeNo)
-      val tmpArr = arr.map(a => a.path.name.drop(6).toInt) // drop worker prefix from name of neighbor to get node name
+      val tmpArr = arr.map(a => a.path.name.drop(6).toInt) // drop worker prefix from name of neighbor to get node numbers.
       tmpArr += nodeNo // add self node to exclude list when selecting random
 
+      // select a random node as a fifth guy.
       var tmp = 1
       do {
         tmp = rand.nextInt(nodesArr.length)
@@ -153,6 +157,7 @@ object Project2 {
       return arr
     }
 
+    // Get random neighbor in a full n/w Topology for a given node no.
     def getRandomNode(ref: ActorRef): Unit = {
       // send stop message to self if u are the only one left.
       if (nodesArr.length == 1) {
@@ -168,6 +173,7 @@ object Project2 {
       }
     }
 
+    // Receive block for the Watcher.
     final def receive = {
       // send message to the first node to initiate after setting start time.
       case Initiate =>
@@ -182,15 +188,18 @@ object Project2 {
       case GetRandomNode =>
         getNode(sender)
 
-      case ReInstate(s, w) =>
+      // when the message is stuck in an island, an actor sends this message to watcher before shutting down. We send the message to a random node. 
+      case ReInitiate(s, w) =>
         nodesArr(rand.nextInt(nodesArr.length)) ! GossipWorker.PushSumMsg(s, w)
 
-      case ReinstateGossip =>
+      // when the message is stuck in an island, an actor sends this message to watcher before shutting down. We send the message to a random node.
+      case ReinitiateGossip =>
         nodesArr(rand.nextInt(nodesArr.length)) ! GossipWorker.Gossip
 
-      // Send Terminate Message to this actor to remove from network.
+      // When Actors send Terminate Message to Watcher to remove from network.
       case Terminate(ref) =>
         nodesArr -= ref
+        // when all actors are down, shutdown the system.
         if (nodesArr.isEmpty) {
           val finalTime = System.currentTimeMillis()
           println(finalTime - startTime)
@@ -199,7 +208,6 @@ object Project2 {
 
       case _ => println("FAILED HERE")
     }
-
   }
 
   object GossipWorker {
@@ -222,35 +230,43 @@ object Project2 {
     var prevsw: Double = 0
     var consecutive: Int = 0
 
+    // Receive Block for a normal Gossip Message
     def gossipNetwork: Receive = {
-      // when receive a msg, ask for a node to send to.
+      // when a msg is recd., ask Watcher for a node to forward the message.
       case Gossip =>
         watcherRef ! Watcher.GetRandomNode
-      // on receiving the node, forward the message accordingly.
+
+      // on receiving the node from Watcher, forward the message accordingly.
       case GossipNode(result) =>
         count += 1;
+        // Terminate if the msg has been recd n times. Ask Watcher to remove from n/w, forward the msg, then shutdown.
         if (count == 10) {
           watcherRef ! Watcher.Terminate(self)
           result ! Gossip
           context.stop(self)
         } else {
-          result ! Gossip
+          result ! Gossip // else just forward the msg.
         }
-      // when I receive stop request from master itself.
+
+      // Stop request recd from Watcher itself. Ask the watcher to remove from n/w, then reinitiate the current msg into the n/w
       case Stop =>
         watcherRef ! Watcher.Terminate(self)
-        watcherRef ! Watcher.ReinstateGossip
+        watcherRef ! Watcher.ReinitiateGossip
         context.stop(self)
+
       case _ => sender ! Failed
     }
 
+    // Receive Block for Push Sum Computation
     def pushSumNetwork: Receive = {
-      // when receive a msg, ask for a node to send to.
+      // when a msg is recd., ask Watcher for a node to forward the message.
       case PushSumMsg(a, b) =>
         prevsw = s / w
         s = s + a;
         w = w + b;
         sw = s / w;
+        s = s / 2.0
+        w = w / 2.0
         watcherRef ! Watcher.GetRandomNode
 
       // on receiving the node, forward the message accordingly.      
@@ -262,17 +278,18 @@ object Project2 {
         }
         if (consecutive == 3) {
           watcherRef ! Watcher.Terminate(self)
-          result ! PushSumMsg(s / 2, w / 2)
+          result ! PushSumMsg(s, w)
           context.stop(self)
         } else {
-          result ! PushSumMsg(s / 2, w / 2)
+          result ! PushSumMsg(s, w)
         }
 
-      // when I receive stop request from master itself.
+      // Stop request recd from Watcher itself. Ask the watcher to remove from n/w, then reinitiate the current msg into the n/w
       case Stop =>
         watcherRef ! Watcher.Terminate(self)
-        watcherRef ! Watcher.ReInstate(s / 2, w / 2)
+        watcherRef ! Watcher.ReInitiate(s, w)
         context.stop(self)
+
       case _ => sender ! Failed
     }
 
