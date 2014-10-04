@@ -1,16 +1,19 @@
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.Await
+import scala.concurrent.duration.DurationInt
 import scala.util.Random
-import com.typesafe.config.ConfigFactory
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.Terminated
+import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import scala.concurrent.Await
 import akka.pattern.ask
 import akka.util.Timeout
-import scala.concurrent.duration._
+import com.typesafe.config.ConfigFactory
+
+// Think of tracking the messages being recd by the actors and shutdown entire system when recd atleast once.
 
 object Project2 {
   def main(args: Array[String]) {
@@ -34,7 +37,8 @@ object Project2 {
       }
 
       // create actor system and a watcher actor
-      val system = ActorSystem("Gossip")
+
+      val system = ActorSystem("Gossip", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "log-dead-letters" : 1000 } } """)))
       val watcher = system.actorOf(Props(new Watcher(numNodes, topo, algo)), name = "Watcher")
       watcher ! Watcher.Initiate
     }
@@ -42,28 +46,30 @@ object Project2 {
 
   object Watcher {
     // Used by others to register an Actor for watching
-    case class WatchMe(ref: ActorRef)
+    case class Terminate(ref: ActorRef)
     case object Initiate
     case object GetRandomNode
+    case class ReInstate(s: Double, w: Double)
+    case object ReinstateGossip
   }
 
   class Watcher(noOfNodes: Int, topology: String, algorithm: String) extends Actor {
     import Watcher._
     import context._
+    var startTime = System.currentTimeMillis()
 
     // keep track of what we have created and are watching.
     val nodesArr = ArrayBuffer.empty[ActorRef]
+    val neighborArr = ArrayBuffer.empty[ArrayBuffer[ActorRef]]
     val rand = new Random(System.currentTimeMillis())
 
     // create array of all nodes (actors)    
     for (i <- 0 to noOfNodes - 1) {
-      var node = actorOf(Props(new GossipWorker(topology, algorithm)), name = "Worker" + i)
-      node ! "init"
+      var node = actorOf(Props(new GossipWorker()), name = "Worker" + i)
+      node ! GossipWorker.Init(algorithm)
       nodesArr += node
-      context.watch(node)
     }
 
-    // send list of neighbors to all nodes (actors) 
     for (i <- 0 to noOfNodes - 1) {
       var neighbours = ArrayBuffer.empty[ActorRef]
       if (topology == "2D") {
@@ -72,37 +78,30 @@ object Project2 {
         neighbours = getLineNodes(i)
       } else if (topology == "imp2D") {
         neighbours = getImp2DNodes(i)
-        // the last element in the array is the random guy. Send this guy the inward bound reference.
-        var randomNeighbour = neighbours.last
-        randomNeighbour ! GossipWorker.RandomGuy(nodesArr(i))
       }
-      nodesArr(i) ! GossipWorker.AddNeighbour(neighbours)
+      neighborArr += neighbours
     }
     // end of constructor
-    final def receive = {
-      case WatchMe(ref) =>
-        context.watch(ref)
-        nodesArr += ref
-      case Terminated(ref) =>
-        nodesArr -= ref
-        if (nodesArr.isEmpty) {
-          context.system.shutdown
+
+    def getNode(ref: ActorRef): Unit = topology match {
+      case "full" => getRandomNode(ref)
+      case "2D" | "line" | "imp2D" =>
+        var index = ref.path.name.drop(6).toInt
+        var tmp = neighborArr(index)
+        var found = false
+
+        while (!tmp.isEmpty && !found) {
+          var result = tmp(rand.nextInt(tmp.length))
+          if (nodesArr.contains(result)) {
+            found = true
+            ref ! GossipWorker.GossipNode(result)
+          } else {
+            tmp -= result
+          }
         }
-      case Initiate =>
-      case GetRandomNode => getRandom(sender)
-      case _ => println("FAILED")
-
-    }
-
-    def getRandom(ref: ActorRef): ActorRef = {
-      var selfIndex = ref.path.name.drop(6).toInt
-      var tmp = 0
-      var ctr = 0
-      do {
-        tmp = rand.nextInt(nodesArr.length)
-        ctr += 1
-      } while (tmp != selfIndex && ctr < 5)
-      return nodesArr(tmp)
+        if (!found) {
+          ref ! GossipWorker.Stop
+        }
     }
 
     def getLineNodes(nodeNo: Int): ArrayBuffer[ActorRef] = {
@@ -153,73 +152,138 @@ object Project2 {
       arr += nodesArr(tmp)
       return arr
     }
+
+    def getRandomNode(ref: ActorRef): Unit = {
+      // send stop message to self if u are the only one left.
+      if (nodesArr.length == 1) {
+        ref ! GossipWorker.Stop
+      } else {
+        var tmp = 0
+        // loop till u find a reference other than ur self.
+        do {
+          tmp = rand.nextInt(nodesArr.length)
+        } while (nodesArr(tmp) == ref)
+        // send the reference to the actor which requested the node.
+        ref ! GossipWorker.GossipNode(nodesArr(tmp))
+      }
+    }
+
+    final def receive = {
+      // send message to the first node to initiate after setting start time.
+      case Initiate =>
+        startTime = System.currentTimeMillis()
+        if (algorithm == "push-sum") {
+          nodesArr(0) ! GossipWorker.PushSumMsg(0.0, 1.0)
+        } else {
+          nodesArr(0) ! GossipWorker.Gossip
+        }
+
+      // get random node to send the message to.
+      case GetRandomNode =>
+        getNode(sender)
+
+      case ReInstate(s, w) =>
+        nodesArr(rand.nextInt(nodesArr.length)) ! GossipWorker.PushSumMsg(s, w)
+
+      case ReinstateGossip =>
+        nodesArr(rand.nextInt(nodesArr.length)) ! GossipWorker.Gossip
+
+      // Send Terminate Message to this actor to remove from network.
+      case Terminate(ref) =>
+        nodesArr -= ref
+        if (nodesArr.isEmpty) {
+          val finalTime = System.currentTimeMillis()
+          println(finalTime - startTime)
+          context.system.shutdown
+        }
+
+      case _ => println("FAILED HERE")
+    }
+
   }
 
   object GossipWorker {
-    case class AddNeighbour(arr: ArrayBuffer[ActorRef])
-    case class RemoveNeighbour(arr: ArrayBuffer[ActorRef])
-    case class RandomGuy(randomGuy: ActorRef)
-    case class PushSumMsg(s: Int, w: Int)
+    case class GossipNode(result: ActorRef)
+    case class PushSumMsg(s: Double, w: Double)
     case object Gossip
+    case object Stop
     case object Failed
+    case class Init(algo: String)
   }
 
-  class GossipWorker(topology: String, algorithm: String) extends Actor {
+  class GossipWorker() extends Actor {
     import context._
     import GossipWorker._
-    var neighbors = ArrayBuffer.empty[ActorRef]
-    var randomInwardGuy: ActorRef = null
     var watcherRef: ActorRef = null
-
-    def gossipFullNetwork: Receive = {
-      case Gossip =>
-        implicit val timeout = new Timeout(5 seconds)
-        val future = watcherRef ? Watcher.GetRandomNode
-        val result = Await.result(future, timeout.duration).asInstanceOf[ActorRef]
-        result ! "gossip"
-        stop(self)
-      case _ => sender ! Failed
-    }
-
-    def pushSumFullNetwork: Receive = {
-      case "" =>
-      case _ => sender ! Failed
-    }
+    var count = 0
+    var s: Double = self.path.name.drop(6).toDouble
+    var w: Double = 1
+    var sw: Double = 0
+    var prevsw: Double = 0
+    var consecutive: Int = 0
 
     def gossipNetwork: Receive = {
-      case AddNeighbour(arr) =>
-        neighbors ++= arr
-      case RemoveNeighbour(arr) =>
-        neighbors --= arr
-      case RandomGuy(randomGuy) => randomInwardGuy = randomGuy
+      // when receive a msg, ask for a node to send to.
+      case Gossip =>
+        watcherRef ! Watcher.GetRandomNode
+      // on receiving the node, forward the message accordingly.
+      case GossipNode(result) =>
+        count += 1;
+        if (count == 10) {
+          watcherRef ! Watcher.Terminate(self)
+          result ! Gossip
+          context.stop(self)
+        } else {
+          result ! Gossip
+        }
+      // when I receive stop request from master itself.
+      case Stop =>
+        watcherRef ! Watcher.Terminate(self)
+        watcherRef ! Watcher.ReinstateGossip
+        context.stop(self)
       case _ => sender ! Failed
     }
 
     def pushSumNetwork: Receive = {
-      case AddNeighbour(arr) =>
-        neighbors ++= arr
-      case RemoveNeighbour(arr) =>
-        neighbors --= arr
-      case RandomGuy(randomGuy) => randomInwardGuy = randomGuy
+      // when receive a msg, ask for a node to send to.
+      case PushSumMsg(a, b) =>
+        prevsw = s / w
+        s = s + a;
+        w = w + b;
+        sw = s / w;
+        watcherRef ! Watcher.GetRandomNode
+
+      // on receiving the node, forward the message accordingly.      
+      case GossipNode(result) =>
+        if ((prevsw - (sw)).abs > .0000000001) {
+          consecutive = 0;
+        } else {
+          consecutive += 1;
+        }
+        if (consecutive == 3) {
+          watcherRef ! Watcher.Terminate(self)
+          result ! PushSumMsg(s / 2, w / 2)
+          context.stop(self)
+        } else {
+          result ! PushSumMsg(s / 2, w / 2)
+        }
+
+      // when I receive stop request from master itself.
+      case Stop =>
+        watcherRef ! Watcher.Terminate(self)
+        watcherRef ! Watcher.ReInstate(s / 2, w / 2)
+        context.stop(self)
       case _ => sender ! Failed
     }
 
     def receive = LoggingReceive {
-      case "init" =>
+      case Init(algorithm) =>
         watcherRef = sender
         // if algorithm type is push sum, use a certain type of object
-        if (topology == "full") {
-          if (algorithm == "push-sum") {
-            become(pushSumFullNetwork)
-          } else {
-            become(gossipFullNetwork)
-          }
+        if (algorithm == "push-sum") {
+          become(pushSumNetwork)
         } else {
-          if (algorithm == "push-sum") {
-            become(pushSumNetwork)
-          } else {
-            become(gossipNetwork)
-          }
+          become(gossipNetwork)
         }
       case _ => println("FAILED")
     }
