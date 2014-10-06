@@ -33,11 +33,12 @@ object Project2Bonus {
         numNodes = tmp.toInt
       }
 
-      var failureRate = 10
+      var failureRate = 1
+      var NodeTimeoutCounter = 4000 // Total TimeOut in milliseconds = NodeTimeoutCounter * HeartBeat
 
       // create actor system and a watcher actor
       val system = ActorSystem("Gossip")
-      val watcher = system.actorOf(Props(new Watcher(numNodes, topo, algo)), name = "Watcher")
+      val watcher = system.actorOf(Props(new Watcher(numNodes, topo, algo, NodeTimeoutCounter)), name = "Watcher")
       watcher ! Watcher.NodeFailure(failureRate)
       watcher ! Watcher.Initiate
     }
@@ -51,7 +52,7 @@ object Project2Bonus {
     case class NodeFailure(failureRate: Int)
   }
 
-  class Watcher(noOfNodes: Int, topology: String, algorithm: String) extends Actor {
+  class Watcher(noOfNodes: Int, topology: String, algorithm: String, ctr: Int) extends Actor {
     import Watcher._
     import context._
     var startTime = System.currentTimeMillis()
@@ -65,7 +66,7 @@ object Project2Bonus {
 
     // create array of all nodes (actors)    
     for (i <- 0 to noOfNodes - 1) {
-      var node = actorOf(Props(new GossipWorker(4000)), name = "Worker" + i)
+      var node = actorOf(Props(new GossipWorker(ctr)), name = "Worker" + i)
       node ! GossipWorker.Init(algorithm, topology)
       nodesArr += node
     }
