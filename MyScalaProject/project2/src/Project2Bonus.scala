@@ -65,7 +65,7 @@ object Project2Bonus {
 
     // create array of all nodes (actors)    
     for (i <- 0 to noOfNodes - 1) {
-      var node = actorOf(Props(new GossipWorker(2000)), name = "Worker" + i)
+      var node = actorOf(Props(new GossipWorker(4000)), name = "Worker" + i)
       node ! GossipWorker.Init(algorithm, topology)
       nodesArr += node
     }
@@ -233,6 +233,13 @@ object Project2Bonus {
     var cancellable = system.scheduler.schedule(2 seconds, 5 milliseconds, self, SendMessage)
     var timeoutCounter = 0
 
+    def stop() {
+      cancellable.cancel
+      isAlive = false
+      count = 10
+      watcherRef ! Watcher.Terminate(self)
+    }
+
     // Receive Block for a normal Gossip Message
     def gossipNetwork: Receive = {
       case AddNeighbour(arr) =>
@@ -240,11 +247,6 @@ object Project2Bonus {
 
       case RemoveNeighbour =>
         neighbors -= sender
-        if (neighbors.length == 0) {
-          cancellable.cancel
-          isAlive = false
-          watcherRef ! Watcher.Terminate(self)
-        }
 
       case Gossip =>
         count += 1;
@@ -282,10 +284,7 @@ object Project2Bonus {
         }
 
       case Stop =>
-        cancellable.cancel
-        isAlive = false
-        count = 10
-        watcherRef ! Watcher.Terminate(self)
+        stop()
 
       case _ => println("FAILED")
     }
@@ -321,10 +320,7 @@ object Project2Bonus {
         ref ! Gossip
 
       case Stop =>
-        cancellable.cancel
-        isAlive = false
-        count = 10
-        watcherRef ! Watcher.Terminate(self)
+        stop()
 
       case _ => println("FAILED")
     }
@@ -371,10 +367,7 @@ object Project2Bonus {
         ref ! PushSumMsg(s, w)
 
       case Stop =>
-        cancellable.cancel
-        isAlive = false
-        count = 10
-        watcherRef ! Watcher.Terminate(self, sw)
+        stop()
 
       case _ => println("FAILED")
     }
@@ -385,11 +378,6 @@ object Project2Bonus {
 
       case RemoveNeighbour =>
         neighbors -= sender
-        if (neighbors.length == 0) {
-          cancellable.cancel
-          isAlive = false
-          watcherRef ! Watcher.Terminate(self, sw)
-        }
 
       case PushSumMsg(a, b) =>
         count += 1;
@@ -439,10 +427,7 @@ object Project2Bonus {
         }
 
       case Stop =>
-        cancellable.cancel
-        isAlive = false
-        count = 10
-        watcherRef ! Watcher.Terminate(self, sw)
+        stop()
 
       case _ => println("FAILED")
     }
