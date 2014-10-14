@@ -12,7 +12,7 @@ import akka.event.LoggingReceive
 
 // Think of tracking the messages being recd by the actors and shutdown entire system when recd atleast once.
 
-object Project {
+object Project2 {
   def main(args: Array[String]) {
     // exit if arguments not passed as command line param.
     if (args.length < 3) {
