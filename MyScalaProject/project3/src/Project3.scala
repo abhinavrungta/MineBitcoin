@@ -91,15 +91,19 @@ object Project3 {
     var count = 0
 
     var base = math.pow(2, b).toInt
-    var numberOfRows = math.ceil(128 / b).toInt
+    var numberOfRows = 8 // since we take only first 8 digits of a hash.
 
-    var nodeId = MessageDigest.getInstance("MD5").digest(number.toString().getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base))
-    var leafArr = new Array[obj](base)
+    // Get Node Id.
+    var currentNodeId = MessageDigest.getInstance("MD5").digest(number.toString().getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, 7).toInt
+
+    // declare state tables.
+    var leftLeafArr = new Array[obj](base / 2)
+    var rightLeafArr = new Array[obj](base / 2)
     var neighborArr = new Array[obj](base)
     var routingArr = Array.ofDim[obj](numberOfRows, base)
 
-    // initialize routing array with greyed out cell for self
-    var tmp = nodeId.toCharArray()
+    // initialize routing array with current NodeId.
+    var tmp = currentNodeId.toString
     while (count < tmp.length()) {
       val digit = tmp(count) - '0'
       routingArr(count)(digit) = new obj(-1, number)
@@ -115,10 +119,7 @@ object Project3 {
         tmp = tmp / base
       }
       str += tmp
-      while (str.length < 8 / (math.log(base) / math.log(2))) {
-        str += 0
-      }
-      str.reverse
+      return str
     }
 
     def updateLeafSet(arr: Array[obj]) {
@@ -131,6 +132,72 @@ object Project3 {
 
     def updateRoutingSet(arr: Array[Array[obj]]) {
 
+    }
+
+    def route(msg: String, key: Int) {
+      var currPrefixSize = 0
+      val currNodeIdDiff = (key - currentNodeId).abs
+      var strKey = key.toString
+
+      // if found in leaf set.
+      if (key >= leftLeafArr.minBy(a => a.nodeId).nodeId && key <= rightLeafArr.maxBy(a => a.nodeId).nodeId) {
+        val tmp = leftLeafArr.minBy(a => (key - a.nodeId).abs)
+        val tmp2 = rightLeafArr.minBy(a => (key - a.nodeId).abs)
+        if (tmp.nodeId < tmp2.nodeId) {
+          forward(msg, tmp.nodeId)
+        } else {
+          forward(msg, tmp2.nodeId)
+        }
+      } else {
+        // search in routing table.
+        currPrefixSize = shl(strKey, currentNodeId.toString)
+        var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize))
+        // if appropriate entry found, forward it.
+        if (routingEntry != null) {
+          forward(msg, routingEntry.nodeId)
+        } else {
+          // else, search all the data sets.
+          var tmpArr = leftLeafArr
+          tmpArr ++= rightLeafArr
+          tmpArr ++= neighborArr
+          for (count <- currPrefixSize to routingArr.length - 1) {
+            tmpArr ++= routingArr(count)
+          }
+
+          count = 0
+          var found = false
+          while (count < tmpArr.length && !found) {
+            if (tmpArr(count).nodeId == -1) {
+              // if it is the current node id, ignore.
+              count += 1
+            } else {
+              var prefixSize = shl(strKey, tmpArr(count).nodeId.toString)
+              if (prefixSize >= currPrefixSize) {
+                var nodeDiff = (key - tmpArr(count).nodeId).abs
+                if (nodeDiff < currNodeIdDiff) {
+                  found = true
+                  forward(msg, tmpArr(count).nodeId)
+                }
+              }
+            }
+            // end of while
+          }
+          // end of else
+        }
+        // end of else
+      }
+      // end of method
+    }
+
+    def forward(msg: String, key: Int) {
+    }
+
+    def shl(key: String, nodeId: String): Int = {
+      var count = 0
+      while (count < 8 - 1 && (key(count) == nodeId(count))) {
+        count += 1
+      }
+      return count
     }
 
     // Receive Block for a normal Gossip Message
