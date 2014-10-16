@@ -33,7 +33,7 @@ object Project3 {
   object Watcher {
     case class Terminate(ref: ActorRef)
     case object Initiate
-    case object getLiveNeighbor
+    case object SendLiveNeighbor
   }
 
   class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
@@ -59,15 +59,15 @@ object Project3 {
       case Initiate =>
         startTime = System.currentTimeMillis()
 
-      case Watcher.getLiveNeighbor =>
+      case SendLiveNeighbor =>
         var index = nodesArr.indexOf(sender)
         var length = nodesArr.length
         if (index != -1) {
           if (length != 1) {
             if (index == 0) {
-              sender ! Pastry.Neighbor(nodesArr(index + 1))
+              sender ! Pastry.RecieveLiveNeighbor(nodesArr(index + 1))
             } else {
-              sender ! Pastry.Neighbor(nodesArr(index - 1))
+              sender ! Pastry.RecieveLiveNeighbor(nodesArr(index - 1))
             }
           }
         }
@@ -87,7 +87,7 @@ object Project3 {
   }
 
   class Application(nodeNumber: Int) {
-    def forward(msg: String, key: Int, node: Pastry.node) {
+    def forward(msg: String, key: Pastry.Node, node: Pastry.Node) {
       /* TODO Template */
     }
 
@@ -96,57 +96,58 @@ object Project3 {
       println("delivered")
     }
 
-    def newLeafs(msg: Array[Pastry.node]) {
+    def newLeafs(msg: Array[Pastry.Node]) {
       /* TODO Template */
     }
   }
 
   object Pastry {
-    case class node(nodeId: Int, nodeRef: ActorRef)
-    case class routeMsg(msg: String, key: Int)
-    case class Neighbor(nodeRef: ActorRef)
+    case class Node(var nodeId: Int, nodeRef: ActorRef)
+    case class RouteMsg(msg: String, key: Node)
+    case class RecieveLiveNeighbor(nodeRef: ActorRef)
+    case class StateTable(arr: Array[Node], setType: String)
     case object Init
+    case object FAILED
   }
 
   class Pastry(b: Int) extends Actor {
     import context._
     import Pastry._
 
-    var watcherRef: ActorRef = null
     var isAlive = false
     var cancellable: Cancellable = null
     var count = 0
-    var selfNodeId = -1
+    var selfNode = new Node(-1, self)
     var handler: Application = null
 
     var base = math.pow(2, b).toInt
     var numberOfRows = 8 // since we take only first 8 digits of a hash.
 
     // declare state tables.
-    var leftLeafArr = new Array[node](base / 2)
-    var rightLeafArr = new Array[node](base / 2)
-    var neighborArr = new Array[node](base)
-    var routingArr = Array.ofDim[node](numberOfRows, base) // Get Node Id.
+    var leftLeafArr = new Array[Node](base / 2)
+    var rightLeafArr = new Array[Node](base / 2)
+    var neighborArr = new Array[Node](base)
+    var routingArr = Array.ofDim[Node](numberOfRows, base) // Get Node Id.
 
     // called by application to bring up Pastry node and add to the network.
     def pastryInit(handler: Application): Int = {
       this.handler = handler
       var nodeNumber = self.path.name.drop(6).toInt
-      selfNodeId = MessageDigest.getInstance("MD5").digest(nodeNumber.toString().getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, 8 - 1).toInt
+      selfNode.nodeId = MessageDigest.getInstance("MD5").digest(nodeNumber.toString().getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, 8 - 1).toInt
 
       // initialize routing array with current NodeId.
-      var tmp = selfNodeId.toString
+      var tmp = selfNode.nodeId.toString
       while (count < tmp.length()) {
         val digit = tmp(count) - '0'
-        routingArr(count)(digit) = new node(-1, self)
+        routingArr(count)(digit) = new Node(-1, self)
         count += 1
       }
 
       // get Neighbor by Proximity. Ideal Solution is to use an increasing ring of multi-cast, but we will just use Watcher to query the same.
-      parent ! Watcher.getLiveNeighbor
+      parent ! Watcher.SendLiveNeighbor
 
       // when u get the neighbor, ask the guy to send a join msg, with your nodeId.
-      return selfNodeId
+      return selfNode.nodeId
     }
 
     def convertDecimaltoBase(no: Int, base: Int): String = {
@@ -160,46 +161,46 @@ object Project3 {
       return str
     }
 
-    def updateLeafSet(arr: Array[node]) {
+    def updateLeafSet(arr: Array[Node]) {
 
     }
 
-    def updateNeighborSet(arr: Array[node]) {
+    def updateNeighborSet(arr: Array[Node]) {
 
     }
 
-    def updateRoutingSet(arr: Array[Array[node]]) {
+    def updateRoutingSet(arr: Array[Array[Node]]) {
 
     }
 
     // route message to node with closest key value.
-    def route(msg: String, key: Int) {
+    def route(msg: String, key: Node) {
       var currPrefixSize = 0
-      val currNodeIdDiff = (key - selfNodeId).abs
+      val currNodeIdDiff = (key.nodeId - selfNode.nodeId).abs
       var strKey = key.toString
 
       // if found in leaf set.
-      if (key >= leftLeafArr.minBy(a => a.nodeId).nodeId && key <= rightLeafArr.maxBy(a => a.nodeId).nodeId) {
-        val tmp = leftLeafArr.minBy(a => (key - a.nodeId).abs)
-        val tmp2 = rightLeafArr.minBy(a => (key - a.nodeId).abs)
+      if (key.nodeId >= leftLeafArr.minBy(a => a.nodeId).nodeId && key.nodeId <= rightLeafArr.maxBy(a => a.nodeId).nodeId) {
+        val tmp = leftLeafArr.minBy(a => (key.nodeId - a.nodeId).abs)
+        val tmp2 = rightLeafArr.minBy(a => (key.nodeId - a.nodeId).abs)
         if (tmp.nodeId < tmp2.nodeId) {
           // call to application.
           handler.forward(msg, key, tmp)
-          tmp.nodeRef ! routeMsg(msg, key)
+          tmp.nodeRef ! RouteMsg(msg, key)
         } else {
           // call to application.
           handler.forward(msg, key, tmp2)
-          tmp2.nodeRef ! routeMsg(msg, key)
+          tmp2.nodeRef ! RouteMsg(msg, key)
         }
       } else {
         // search in routing table.
-        currPrefixSize = shl(strKey, selfNodeId.toString)
+        currPrefixSize = shl(strKey, selfNode.nodeId.toString)
         var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize))
         // if appropriate entry found, forward it.
         if (routingEntry != null) {
           // call to application.
           handler.forward(msg, key, routingEntry)
-          routingEntry.nodeRef ! routeMsg(msg, key)
+          routingEntry.nodeRef ! RouteMsg(msg, key)
         } else {
           // else, search all the data sets.
           var tmpArr = leftLeafArr
@@ -218,12 +219,12 @@ object Project3 {
             } else {
               var prefixSize = shl(strKey, tmpArr(count).nodeId.toString)
               if (prefixSize >= currPrefixSize) {
-                var nodeDiff = (key - tmpArr(count).nodeId).abs
+                var nodeDiff = (key.nodeId - tmpArr(count).nodeId).abs
                 if (nodeDiff < currNodeIdDiff) {
                   found = true
                   // call to application.
                   handler.forward(msg, key, tmpArr(count))
-                  tmpArr(count).nodeRef ! routeMsg(msg, key)
+                  tmpArr(count).nodeRef ! RouteMsg(msg, key)
                 }
               }
             }
@@ -246,14 +247,24 @@ object Project3 {
 
     def receive = LoggingReceive {
       case Init =>
-        watcherRef = sender
         pastryInit(new Application(self.path.name.drop(6).toInt))
 
-      case Neighbor(ref) =>
-        ref ! routeMsg("join", selfNodeId)
+      case RecieveLiveNeighbor(ref) =>
+        ref ! RouteMsg("join", selfNode)
 
-      case routeMsg(msg, key) =>
-        route(msg, key)
+      case RouteMsg(msg, key) =>
+        if (isAlive) {
+          route(msg, key)
+        } else {
+          sender ! FAILED
+        }
+
+      case StateTable(arr, setType) =>
+        if (setType == "neighbor") {
+          updateNeighborSet(arr)
+        } else if (setType == "leaf") {
+          updateLeafSet(arr)
+        }
 
       case _ => println("FAILED")
     }
