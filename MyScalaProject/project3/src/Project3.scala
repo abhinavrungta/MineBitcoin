@@ -1,7 +1,5 @@
 package project3.src;
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.DurationInt
-import scala.util.Random
 
 import akka.actor.Actor
 import akka.actor.ActorRef
@@ -33,26 +31,26 @@ object Project3 {
   }
 
   object Watcher {
-    case class Terminate(ref: ActorRef, sw: Double = 0.0)
+    case class Terminate(ref: ActorRef)
     case object Initiate
+    case object getLiveNeighbor
   }
 
   class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
     import Watcher._
     import context._
     var startTime = System.currentTimeMillis()
+    var b = 2
 
     // keep track of actors.
     val nodesArr = ArrayBuffer.empty[ActorRef]
-    val rand = new Random(System.currentTimeMillis())
 
     // create array of all nodes (actors)    
     for (i <- 0 to noOfNodes - 1) {
-      var node = actorOf(Props(new GossipWorker(2, i)), name = "Worker" + i)
+      var node = actorOf(Props(new Pastry(b)), name = "Worker" + i)
       //node ! GossipWorker.Init(algorithm, topology)
       nodesArr += node
     }
-
     // end of constructor
 
     // Receive block for the Watcher.
@@ -61,8 +59,21 @@ object Project3 {
       case Initiate =>
         startTime = System.currentTimeMillis()
 
+      case Watcher.getLiveNeighbor =>
+        var index = nodesArr.indexOf(sender)
+        var length = nodesArr.length
+        if (index != -1) {
+          if (length != 1) {
+            if (index == 0) {
+              sender ! Pastry.Neighbor(nodesArr(index + 1))
+            } else {
+              sender ! Pastry.Neighbor(nodesArr(index - 1))
+            }
+          }
+        }
+
       // When Actors send Terminate Message to Watcher to remove from network.
-      case Terminate(ref, sw) =>
+      case Terminate(ref) =>
         nodesArr -= ref
         // when all actors are down, shutdown the system.
         if (nodesArr.isEmpty) {
@@ -75,41 +86,68 @@ object Project3 {
     }
   }
 
-  object GossipWorker {
-    case class obj(nodeId: Int, ip: Int)
-    case class Init(algo: String, topo: String)
+  class Application(nodeNumber: Int) {
+    def forward(msg: String, key: Int, node: Pastry.node) {
+      /* TODO Template */
+    }
+
+    def deliver(msg: String, key: Int) {
+      /* TODO Template */
+      println("delivered")
+    }
+
+    def newLeafs(msg: Array[Pastry.node]) {
+      /* TODO Template */
+    }
   }
 
-  class GossipWorker(b: Int, number: Int) extends Actor {
+  object Pastry {
+    case class node(nodeId: Int, nodeRef: ActorRef)
+    case class routeMsg(msg: String, key: Int)
+    case class Neighbor(nodeRef: ActorRef)
+    case object Init
+  }
+
+  class Pastry(b: Int) extends Actor {
     import context._
-    import GossipWorker._
+    import Pastry._
 
     var watcherRef: ActorRef = null
-    val rand = new Random(System.currentTimeMillis())
-    var isAlive = true
+    var isAlive = false
     var cancellable: Cancellable = null
     var count = 0
+    var selfNodeId = -1
+    var handler: Application = null
 
     var base = math.pow(2, b).toInt
     var numberOfRows = 8 // since we take only first 8 digits of a hash.
 
-    // Get Node Id.
-    var currentNodeId = MessageDigest.getInstance("MD5").digest(number.toString().getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, 7).toInt
-
     // declare state tables.
-    var leftLeafArr = new Array[obj](base / 2)
-    var rightLeafArr = new Array[obj](base / 2)
-    var neighborArr = new Array[obj](base)
-    var routingArr = Array.ofDim[obj](numberOfRows, base)
+    var leftLeafArr = new Array[node](base / 2)
+    var rightLeafArr = new Array[node](base / 2)
+    var neighborArr = new Array[node](base)
+    var routingArr = Array.ofDim[node](numberOfRows, base) // Get Node Id.
 
-    // initialize routing array with current NodeId.
-    var tmp = currentNodeId.toString
-    while (count < tmp.length()) {
-      val digit = tmp(count) - '0'
-      routingArr(count)(digit) = new obj(-1, number)
-      count += 1
+    // called by application to bring up Pastry node and add to the network.
+    def pastryInit(handler: Application): Int = {
+      this.handler = handler
+      var nodeNumber = self.path.name.drop(6).toInt
+      selfNodeId = MessageDigest.getInstance("MD5").digest(nodeNumber.toString().getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, 8 - 1).toInt
+
+      // initialize routing array with current NodeId.
+      var tmp = selfNodeId.toString
+      while (count < tmp.length()) {
+        val digit = tmp(count) - '0'
+        routingArr(count)(digit) = new node(-1, self)
+        count += 1
+      }
+
+      // get Neighbor by Proximity. Ideal Solution is to use an increasing ring of multi-cast, but we will just use Watcher to query the same.
+      parent ! Watcher.getLiveNeighbor
+
+      // when u get the neighbor, ask the guy to send a join msg, with your nodeId.
+      return selfNodeId
     }
-    count = 0
 
     def convertDecimaltoBase(no: Int, base: Int): String = {
       var tmp = no
@@ -122,21 +160,22 @@ object Project3 {
       return str
     }
 
-    def updateLeafSet(arr: Array[obj]) {
+    def updateLeafSet(arr: Array[node]) {
 
     }
 
-    def updateNeighborSet(arr: Array[obj]) {
+    def updateNeighborSet(arr: Array[node]) {
 
     }
 
-    def updateRoutingSet(arr: Array[Array[obj]]) {
+    def updateRoutingSet(arr: Array[Array[node]]) {
 
     }
 
+    // route message to node with closest key value.
     def route(msg: String, key: Int) {
       var currPrefixSize = 0
-      val currNodeIdDiff = (key - currentNodeId).abs
+      val currNodeIdDiff = (key - selfNodeId).abs
       var strKey = key.toString
 
       // if found in leaf set.
@@ -144,17 +183,23 @@ object Project3 {
         val tmp = leftLeafArr.minBy(a => (key - a.nodeId).abs)
         val tmp2 = rightLeafArr.minBy(a => (key - a.nodeId).abs)
         if (tmp.nodeId < tmp2.nodeId) {
-          forward(msg, tmp.nodeId)
+          // call to application.
+          handler.forward(msg, key, tmp)
+          tmp.nodeRef ! routeMsg(msg, key)
         } else {
-          forward(msg, tmp2.nodeId)
+          // call to application.
+          handler.forward(msg, key, tmp2)
+          tmp2.nodeRef ! routeMsg(msg, key)
         }
       } else {
         // search in routing table.
-        currPrefixSize = shl(strKey, currentNodeId.toString)
+        currPrefixSize = shl(strKey, selfNodeId.toString)
         var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize))
         // if appropriate entry found, forward it.
         if (routingEntry != null) {
-          forward(msg, routingEntry.nodeId)
+          // call to application.
+          handler.forward(msg, key, routingEntry)
+          routingEntry.nodeRef ! routeMsg(msg, key)
         } else {
           // else, search all the data sets.
           var tmpArr = leftLeafArr
@@ -176,7 +221,9 @@ object Project3 {
                 var nodeDiff = (key - tmpArr(count).nodeId).abs
                 if (nodeDiff < currNodeIdDiff) {
                   found = true
-                  forward(msg, tmpArr(count).nodeId)
+                  // call to application.
+                  handler.forward(msg, key, tmpArr(count))
+                  tmpArr(count).nodeRef ! routeMsg(msg, key)
                 }
               }
             }
@@ -189,9 +236,6 @@ object Project3 {
       // end of method
     }
 
-    def forward(msg: String, key: Int) {
-    }
-
     def shl(key: String, nodeId: String): Int = {
       var count = 0
       while (count < 8 - 1 && (key(count) == nodeId(count))) {
@@ -200,24 +244,17 @@ object Project3 {
       return count
     }
 
-    // Receive Block for a normal Gossip Message
-    def gossipNetwork: Receive = {
-      case _ => println("FAILED")
-    }
-
-    // Receive Block for a normal Gossip Message
-    def gossipFullNetwork: Receive = {
-      case _ => println("FAILED")
-    }
-
     def receive = LoggingReceive {
-      case Init(algorithm, topology) =>
+      case Init =>
         watcherRef = sender
-        if (topology == "full") {
-          become(gossipFullNetwork)
-        } else {
-          become(gossipNetwork)
-        }
+        pastryInit(new Application(self.path.name.drop(6).toInt))
+
+      case Neighbor(ref) =>
+        ref ! routeMsg("join", selfNodeId)
+
+      case routeMsg(msg, key) =>
+        route(msg, key)
+
       case _ => println("FAILED")
     }
   }
