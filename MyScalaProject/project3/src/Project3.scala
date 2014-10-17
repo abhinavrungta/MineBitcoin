@@ -232,6 +232,8 @@ object Project3 {
         }
         count += 1
       }
+      leafArr = lr._1
+      leafArr ++= lr._2
     }
 
     def updateNeighborSet(arr: Array[Node]) {
