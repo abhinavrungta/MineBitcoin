@@ -1,5 +1,6 @@
 package project3.src;
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.DurationInt
 
 import akka.actor.Actor
 import akka.actor.ActorRef
@@ -34,6 +35,7 @@ object Project3 {
     case class Terminate(ref: ActorRef)
     case object Initiate
     case object SendLiveNeighbor
+    case object Add
   }
 
   class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
@@ -46,10 +48,9 @@ object Project3 {
     val nodesArr = ArrayBuffer.empty[ActorRef]
 
     // create array of all nodes (actors)    
-    for (i <- 0 to noOfNodes - 1) {
+    for (i <- 1 to noOfNodes) {
       var node = actorOf(Props(new Pastry(b)), name = "Worker" + i)
-      //node ! GossipWorker.Init(algorithm, topology)
-      nodesArr += node
+      system.scheduler.scheduleOnce(100 * i milliseconds, node, Pastry.Init)
     }
     // end of constructor
 
@@ -60,19 +61,21 @@ object Project3 {
         startTime = System.currentTimeMillis()
 
       case SendLiveNeighbor =>
-        var index = nodesArr.indexOf(sender)
         var length = nodesArr.length
-        if (index != -1) {
-          if (length != 1) {
-            if (index == 0) {
-              sender ! Pastry.RecieveLiveNeighbor(nodesArr(index + 1))
-            } else {
-              sender ! Pastry.RecieveLiveNeighbor(nodesArr(index - 1))
-            }
+        var index = sender.path.name.drop(6).toInt
+        if (length == 0) {
+          sender ! Pastry.RecieveLiveNeighbor(null)
+        } else {
+          if (index >= length) {
+            sender ! Pastry.RecieveLiveNeighbor(nodesArr(length - 1))
           } else {
-            sender ! Pastry.RecieveLiveNeighbor(null)
+            sender ! Pastry.RecieveLiveNeighbor(nodesArr(index - 1))
           }
         }
+
+      case Add =>
+        nodesArr += sender
+        nodesArr.sortBy(_.path.name.drop(6).toInt)
 
       // When Actors send Terminate Message to Watcher to remove from network.
       case Terminate(ref) =>
@@ -95,7 +98,7 @@ object Project3 {
 
     def deliver(msg: String, key: Pastry.Node, hop: Int) {
       /* TODO Template */
-      println("delivered")
+      println("delivered " + key.nodeId + " to " + nodeNumber + "with hop count " + hop)
     }
 
     def newLeafs(msg: Array[Pastry.Node]) {
@@ -106,9 +109,9 @@ object Project3 {
   object Pastry {
     case class Node(var nodeId: Int, nodeRef: ActorRef)
     case class RouteMsg(msg: String, key: Node, hop: Int)
-    case class DestinationMsg(msg: String, key: Node, hop: Int)
+    case class FinalHopMsg(msg: String, key: Node, hop: Int)
     case class RecieveLiveNeighbor(nodeRef: ActorRef)
-    case class StateTable(arr: Array[Node], setType: String)
+    case class RecieveStatus(arr: Array[Node], setType: String)
     case object Init
     case object FAILED
   }
@@ -156,23 +159,23 @@ object Project3 {
       val currNodeIdDiff = (key.nodeId - selfNode.nodeId).abs
       var strKey = key.nodeId.toString
       var tmpArr = leafArr.filter(a => a.nodeId > 0)
-
       // if found in leaf set.
-      if (key.nodeId >= tmpArr.minBy(a => a.nodeId).nodeId && key.nodeId <= tmpArr.maxBy(a => a.nodeId).nodeId) {
+      if (tmpArr.length > 0 && key.nodeId >= tmpArr.minBy(a => a.nodeId).nodeId && key.nodeId <= tmpArr.maxBy(a => a.nodeId).nodeId) {
+        println("Routing from Leaf" + strKey)
 
         val tmp = tmpArr.minBy(a => (key.nodeId - a.nodeId).abs)
         // call to application.
         handler.forward(msg, key, tmp)
-        tmp.nodeRef ! DestinationMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
+        tmp.nodeRef ! FinalHopMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
 
       } // search in routing table.
       else {
 
         // if appropriate entry found in routing Table, forward it.
         currPrefixSize = shl(strKey, selfNode.nodeId.toString)
-        var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize))
+        var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize) - '0')
         if (routingEntry.nodeId != 0) {
-
+          println("Routing " + strKey + "from Routing" + routingEntry.nodeId)
           // call to application.
           handler.forward(msg, key, routingEntry)
           routingEntry.nodeRef ! RouteMsg(msg, key, hopCount)
@@ -181,7 +184,7 @@ object Project3 {
         else {
           count = 0
           var found = false
-
+          println("Routing " + strKey + "from Rare")
           // Union all state tables
           tmpArr = leafArr
           tmpArr ++= neighborArr
@@ -199,10 +202,19 @@ object Project3 {
                 found = true
                 handler.forward(msg, key, tmpArr(count)) // call to application.
                 tmpArr(count).nodeRef ! RouteMsg(msg, key, hopCount)
+                println("Routing " + strKey + "from Here" + tmpArr(count).nodeId)
               }
             }
             count += 1
           } // end of while
+          if (!found) {
+            handler.deliver(msg, key, hopCount)
+            // send appropriate routing table entries and leaf table
+            if (msg == "join") {
+              sendStatus(key, hop)
+              key.nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
+            }
+          }
         } // end of else
       } // end of else
     } // end of method
@@ -237,7 +249,20 @@ object Project3 {
     }
 
     def updateNeighborSet(arr: Array[Node]) {
-
+      var count = 0
+      while (count < arr.length) {
+        var id = arr(count).nodeId
+        // 0 implies empty cell
+        if (id > 0) {
+          if (neighborArr(0).nodeId == 0) {
+            neighborArr(0) = arr(count)
+          } else if ((selfNode.nodeId - id).abs < (selfNode.nodeId - neighborArr(0).nodeId).abs) {
+            neighborArr(0) = arr(count)
+          }
+          neighborArr.sortBy(a => a.nodeId)
+        }
+        count += 1
+      }
     }
 
     def updateRoutingSet(arr: Array[Node]) {
@@ -260,9 +285,38 @@ object Project3 {
 
     def sendStatus(key: Node, hop: Int) {
       if (hop == 0) {
-        key.nodeRef ! StateTable(neighborArr, "neighbor")
+        key.nodeRef ! RecieveStatus(neighborArr, "neighbor")
       }
-      key.nodeRef ! StateTable(routingArr(hop), "routing")
+      var PrefixSize = shl(key.nodeId.toString, selfNode.nodeId.toString)
+      key.nodeRef ! RecieveStatus(routingArr(PrefixSize), "routing")
+    }
+
+    def sendStatusAfterJoin() {
+      var ctr = 0
+      while (ctr < leafArr.length) {
+        if (leafArr(ctr).nodeId > 0) {
+          leafArr(ctr).nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
+        }
+        ctr += 1
+      }
+      ctr = 0
+      while (ctr < neighborArr.length) {
+        if (neighborArr(ctr).nodeId > 0) {
+          neighborArr(ctr).nodeRef ! RecieveStatus(neighborArr ++ Array(selfNode), "neighbor")
+        }
+        ctr += 1
+      }
+      ctr = 0
+      while (ctr < routingArr.length) {
+        var col = 0
+        while (col < routingArr(ctr).length) {
+          if (routingArr(ctr)(col).nodeId > 0) {
+            routingArr(ctr)(col).nodeRef ! RecieveStatus(routingArr(ctr) ++ Array(selfNode), "neighbor")
+          }
+          col += 1
+        }
+        ctr += 1
+      }
     }
 
     def convertDecimaltoBase(no: Int, base: Int): String = {
@@ -289,19 +343,26 @@ object Project3 {
         pastryInit(new Application(self.path.name.drop(6).toInt))
 
       case RecieveLiveNeighbor(ref) =>
+
         if (ref != null) {
           ref ! RouteMsg("join", selfNode, 0)
         } else {
           // this is the first node.
+          println("recd")
+          parent ! Watcher.Add
           become(Alive)
         }
 
-      case StateTable(arr, setType) =>
+      case RecieveStatus(arr, setType) =>
         if (setType == "neighbor") {
           updateNeighborSet(arr)
         } else if (setType == "leaf") {
           updateLeafSet(arr)
+
+          sendStatusAfterJoin()
+          parent ! Watcher.Add
           become(Alive)
+
         } else {
           updateRoutingSet(arr)
         }
@@ -318,12 +379,21 @@ object Project3 {
           sendStatus(key, hop)
         }
 
-      case DestinationMsg(msg, key, hop) =>
+      case FinalHopMsg(msg, key, hop) =>
         handler.deliver(msg, key, hop)
         // send appropriate routing table entries and leaf table
         if (msg == "join") {
           sendStatus(key, hop)
-          key.nodeRef ! StateTable(leafArr, "leaf")
+          key.nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
+        }
+
+      case RecieveStatus(arr, setType) =>
+        if (setType == "neighbor") {
+          updateNeighborSet(arr)
+        } else if (setType == "leaf") {
+          updateLeafSet(arr)
+        } else {
+          updateRoutingSet(arr)
         }
     }
 
