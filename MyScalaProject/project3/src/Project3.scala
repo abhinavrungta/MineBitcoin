@@ -32,10 +32,11 @@ object Project3 {
   }
 
   object Watcher {
-    case class Terminate(ref: ActorRef)
+    case class Terminate(node: Pastry.Node)
     case object Initiate
     case object SendLiveNeighbor
-    case object Add
+    case class AddNewNode(node: Pastry.Node)
+    case class VerifyDestination(key: Pastry.Node, actual: Pastry.Node)
   }
 
   class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
@@ -43,9 +44,10 @@ object Project3 {
     import context._
     var startTime = System.currentTimeMillis()
     var b = 2
+    var mismatch = 0
 
     // keep track of actors.
-    val nodesArr = ArrayBuffer.empty[ActorRef]
+    val nodesArr = ArrayBuffer.empty[Pastry.Node]
 
     // create array of all nodes (actors)    
     for (i <- 1 to noOfNodes) {
@@ -67,15 +69,24 @@ object Project3 {
           sender ! Pastry.RecieveLiveNeighbor(null)
         } else {
           if (index >= length) {
-            sender ! Pastry.RecieveLiveNeighbor(nodesArr(length - 1))
+            sender ! Pastry.RecieveLiveNeighbor(nodesArr(length - 1).nodeRef)
           } else {
-            sender ! Pastry.RecieveLiveNeighbor(nodesArr(index - 1))
+            sender ! Pastry.RecieveLiveNeighbor(nodesArr(index - 1).nodeRef)
           }
         }
 
-      case Add =>
-        nodesArr += sender
-        nodesArr.sortBy(_.path.name.drop(6).toInt)
+      case AddNewNode(node) =>
+        nodesArr += node
+        nodesArr.sortBy(_.nodeRef.path.name.drop(6).toInt)
+
+      case VerifyDestination(key, actual) =>
+        val tmp = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
+        if (tmp.nodeId != actual.nodeId) {
+          println("ERROR - Key: " + key.nodeId + " Expected: " + tmp.nodeId + " Actual: " + actual.nodeId)
+          mismatch += 1
+        } else {
+          println("Correct - Key: " + key.nodeId + " Expected: " + tmp.nodeId + " Actual: " + actual.nodeId)
+        }
 
       // When Actors send Terminate Message to Watcher to remove from network.
       case Terminate(ref) =>
@@ -98,7 +109,6 @@ object Project3 {
 
     def deliver(msg: String, key: Pastry.Node, hop: Int) {
       /* TODO Template */
-      println("delivered " + key.nodeId + " to " + nodeNumber + "with hop count " + hop)
     }
 
     def newLeafs(msg: Array[Pastry.Node]) {
@@ -120,28 +130,33 @@ object Project3 {
     import context._
     import Pastry._
 
+    /* Constructor Started */
     var count = 0
     var selfNode = new Node(-1, self)
     var handler: Application = null
 
     var base = math.pow(2, b).toInt
-    var numberOfRows = 8 // since we take only first 8 digits of a hash.
+    var noOfBits = 8 // since we take only first 8 digits of a hash.
 
-    // declare state tables.
+    /* Constructor Ended */
+
+    // declare state tables with default values as (0,null)
     var leafArr = Array.fill(base)(new Node(0, null))
     var neighborArr = Array.fill(base)(new Node(0, null))
-    var routingArr = Array.fill(numberOfRows)(Array.fill(base)(new Node(0, null))) // Get Node Id.
+    var routingArr = Array.fill(noOfBits)(Array.fill(base)(new Node(0, null))) // Get Node Id.
 
     // called by application to bring up Pastry node and add to the network.
     def pastryInit(handler: Application): Node = {
       this.handler = handler
-      selfNode.nodeId = MessageDigest.getInstance("MD5").digest(self.path.name.drop(6).getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, 8 - 1).toInt
+      // take a crypto-hash and convert it to base 2^b. Then take first 8 bits of it.
+      selfNode.nodeId = MessageDigest.getInstance("MD5").digest(self.path.name.drop(6).getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, noOfBits - 1).toInt
 
       // initialize routing array with current NodeId.
       var tmp = selfNode.nodeId.toString
+      count = 0
       while (count < tmp.length()) {
         val digit = tmp(count) - '0'
-        routingArr(count)(digit) = new Node(-1, self)
+        routingArr(count)(digit) = new Node(-1, self) // set matching columns with a -1 node object to indicate self.
         count += 1
       }
 
@@ -153,20 +168,21 @@ object Project3 {
     }
 
     // route message to node with closest key value.
-    def route(msg: String, key: Node, hop: Int = 0) {
-      var hopCount = hop + 1
+    def route(msg: String, key: Node, hopCount: Int = 0): Boolean = {
       var currPrefixSize = 0
       val currNodeIdDiff = (key.nodeId - selfNode.nodeId).abs
       var strKey = key.nodeId.toString
-      var tmpArr = leafArr.filter(a => a.nodeId > 0)
+      var tmpArr = leafArr.filter(a => a.nodeId > 0) // filter empty cells
+      var found = false
       // if found in leaf set.
       if (tmpArr.length > 0 && key.nodeId >= tmpArr.minBy(a => a.nodeId).nodeId && key.nodeId <= tmpArr.maxBy(a => a.nodeId).nodeId) {
-        println("Routing from Leaf" + strKey)
 
         val tmp = tmpArr.minBy(a => (key.nodeId - a.nodeId).abs)
+        println("Routing " + strKey + " from Leaf Node to " + tmp.nodeId)
         // call to application.
         handler.forward(msg, key, tmp)
         tmp.nodeRef ! FinalHopMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
+        found = true
 
       } // search in routing table.
       else {
@@ -175,16 +191,15 @@ object Project3 {
         currPrefixSize = shl(strKey, selfNode.nodeId.toString)
         var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize) - '0')
         if (routingEntry.nodeId != 0) {
-          println("Routing " + strKey + "from Routing" + routingEntry.nodeId)
+          println("Routing " + strKey + " from Routing Table " + routingEntry.nodeId)
           // call to application.
           handler.forward(msg, key, routingEntry)
           routingEntry.nodeRef ! RouteMsg(msg, key, hopCount)
+          found = true
 
         } // else, search all the data sets.        
         else {
           count = 0
-          var found = false
-          println("Routing " + strKey + "from Rare")
           // Union all state tables
           tmpArr = leafArr
           tmpArr ++= neighborArr
@@ -202,21 +217,14 @@ object Project3 {
                 found = true
                 handler.forward(msg, key, tmpArr(count)) // call to application.
                 tmpArr(count).nodeRef ! RouteMsg(msg, key, hopCount)
-                println("Routing " + strKey + "from Here" + tmpArr(count).nodeId)
+                println("Routing " + strKey + " from Rare " + tmpArr(count).nodeId)
               }
             }
             count += 1
           } // end of while
-          if (!found) {
-            handler.deliver(msg, key, hopCount)
-            // send appropriate routing table entries and leaf table
-            if (msg == "join") {
-              sendStatus(key, hop)
-              key.nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
-            }
-          }
         } // end of else
       } // end of else
+      return found
     } // end of method
 
     def updateLeafSet(arr: Array[Node]) {
@@ -291,6 +299,7 @@ object Project3 {
       key.nodeRef ! RecieveStatus(routingArr(PrefixSize), "routing")
     }
 
+    // sent by the newly added node to all the nodes in its tables.
     def sendStatusAfterJoin() {
       var ctr = 0
       while (ctr < leafArr.length) {
@@ -319,6 +328,7 @@ object Project3 {
       }
     }
 
+    // converts to base.
     def convertDecimaltoBase(no: Int, base: Int): String = {
       var tmp = no
       var str = ""
@@ -330,26 +340,27 @@ object Project3 {
       return str
     }
 
+    // returns length of max prefix.
     def shl(key: String, nodeId: String): Int = {
       var count = 0
-      while (count < 8 - 1 && (key(count) == nodeId(count))) {
+      while (count < noOfBits - 1 && (key(count) == nodeId(count))) {
         count += 1
       }
       return count
     }
 
+    // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
       case Init =>
         pastryInit(new Application(self.path.name.drop(6).toInt))
 
       case RecieveLiveNeighbor(ref) =>
-
         if (ref != null) {
-          ref ! RouteMsg("join", selfNode, 0)
+          ref ! RouteMsg("join", selfNode, -1)
         } else {
           // this is the first node.
           println("recd")
-          parent ! Watcher.Add
+          parent ! Watcher.AddNewNode(selfNode)
           become(Alive)
         }
 
@@ -359,8 +370,9 @@ object Project3 {
         } else if (setType == "leaf") {
           updateLeafSet(arr)
 
+          // leaf node is received only join has reached final destination.
           sendStatusAfterJoin()
-          parent ! Watcher.Add
+          parent ! Watcher.AddNewNode(selfNode)
           become(Alive)
 
         } else {
@@ -371,19 +383,30 @@ object Project3 {
 
     }
 
+    // Receive block when in Alive State.
     def Alive: Receive = {
       case RouteMsg(msg, key, hop) =>
-        route(msg, key, hop)
-        // send appropriate routing table entries.
+        var hopCount = hop + 1
+        var forwarded = route(msg, key, hopCount)
+        // send appropriate routing table entries and leaf table
         if (msg == "join") {
-          sendStatus(key, hop)
+          sendStatus(key, hopCount)
+          if (!forwarded) {
+            handler.deliver(msg, key, hopCount)
+            println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
+            parent ! Watcher.VerifyDestination(key, selfNode)
+            key.nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
+          }
         }
 
       case FinalHopMsg(msg, key, hop) =>
-        handler.deliver(msg, key, hop)
+        var hopCount = hop + 1
+        handler.deliver(msg, key, hopCount)
+        println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
         // send appropriate routing table entries and leaf table
         if (msg == "join") {
-          sendStatus(key, hop)
+          sendStatus(key, hopCount)
+          parent ! Watcher.VerifyDestination(key, selfNode)
           key.nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
         }
 
@@ -397,6 +420,7 @@ object Project3 {
         }
     }
 
+    // default state of Actor.
     def receive = Initializing
   }
 }
