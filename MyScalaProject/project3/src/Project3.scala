@@ -52,7 +52,7 @@ object Project3 {
     // create array of all nodes (actors)    
     for (i <- 1 to noOfNodes) {
       var node = actorOf(Props(new Pastry(b)), name = "Worker" + i)
-      system.scheduler.scheduleOnce(100 * i milliseconds, node, Pastry.Init)
+      system.scheduler.scheduleOnce(1000 * i milliseconds, node, Pastry.Init)
     }
     // end of constructor
 
@@ -78,6 +78,7 @@ object Project3 {
       case AddNewNode(node) =>
         nodesArr += node
         nodesArr.sortBy(_.nodeRef.path.name.drop(6).toInt)
+        println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
 
       case VerifyDestination(key, actual) =>
         val tmp = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
@@ -131,6 +132,7 @@ object Project3 {
     import Pastry._
 
     /* Constructor Started */
+    val id = self.path.name.drop(6).toInt
     var count = 0
     var selfNode = new Node(-1, self)
     var handler: Application = null
@@ -149,10 +151,10 @@ object Project3 {
     def pastryInit(handler: Application): Node = {
       this.handler = handler
       // take a crypto-hash and convert it to base 2^b. Then take first 8 bits of it.
-      selfNode.nodeId = MessageDigest.getInstance("MD5").digest(self.path.name.drop(6).getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, noOfBits - 1).toInt
+      selfNode.nodeId = MessageDigest.getInstance("MD5").digest(self.path.name.drop(6).getBytes).foldLeft("")((s: String, by: Byte) => s + convertDecimaltoBase(by & 0xFF, base)).substring(0, noOfBits).toInt
 
       // initialize routing array with current NodeId.
-      var tmp = selfNode.nodeId.toString
+      var tmp = getString(selfNode.nodeId)
       count = 0
       while (count < tmp.length()) {
         val digit = tmp(count) - '0'
@@ -171,27 +173,28 @@ object Project3 {
     def route(msg: String, key: Node, hopCount: Int = 0): Boolean = {
       var currPrefixSize = 0
       val currNodeIdDiff = (key.nodeId - selfNode.nodeId).abs
-      var strKey = key.nodeId.toString
+      var strKey = getString(key.nodeId)
       var tmpArr = leafArr.filter(a => a.nodeId > 0) // filter empty cells
       var found = false
       // if found in leaf set.
       if (tmpArr.length > 0 && key.nodeId >= tmpArr.minBy(a => a.nodeId).nodeId && key.nodeId <= tmpArr.maxBy(a => a.nodeId).nodeId) {
 
         val tmp = tmpArr.minBy(a => (key.nodeId - a.nodeId).abs)
-        println("Routing " + strKey + " from Leaf Node to " + tmp.nodeId)
-        // call to application.
-        handler.forward(msg, key, tmp)
-        tmp.nodeRef ! FinalHopMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
-        found = true
-
+        if (currNodeIdDiff > (key.nodeId - tmp.nodeId).abs) {
+          println("Self: " + selfNode.nodeId + " Routing " + strKey + " to Leaf Node " + tmp.nodeId)
+          // call to application.
+          handler.forward(msg, key, tmp)
+          tmp.nodeRef ! FinalHopMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
+          found = true
+        }
       } // search in routing table.
       else {
 
         // if appropriate entry found in routing Table, forward it.
-        currPrefixSize = shl(strKey, selfNode.nodeId.toString)
+        currPrefixSize = shl(strKey, getString(selfNode.nodeId))
         var routingEntry = routingArr(currPrefixSize)(strKey(currPrefixSize) - '0')
         if (routingEntry.nodeId != 0) {
-          println("Routing " + strKey + " from Routing Table " + routingEntry.nodeId)
+          println("Self: " + selfNode.nodeId + " Routing " + strKey + " to Routing Table " + routingEntry.nodeId)
           // call to application.
           handler.forward(msg, key, routingEntry)
           routingEntry.nodeRef ! RouteMsg(msg, key, hopCount)
@@ -209,15 +212,15 @@ object Project3 {
           tmpArr = tmpArr.filter(a => a.nodeId > 0)
 
           while (count < tmpArr.length && !found) {
-            var prefixSize = shl(strKey, tmpArr(count).nodeId.toString)
+            var prefixSize = shl(strKey, getString(tmpArr(count).nodeId))
             if (prefixSize >= currPrefixSize) {
               var nodeDiff = (key.nodeId - tmpArr(count).nodeId).abs
               // if found probable node in the union.
               if (nodeDiff < currNodeIdDiff) {
                 found = true
                 handler.forward(msg, key, tmpArr(count)) // call to application.
-                tmpArr(count).nodeRef ! RouteMsg(msg, key, hopCount)
-                println("Routing " + strKey + " from Rare " + tmpArr(count).nodeId)
+                tmpArr(count).nodeRef ! FinalHopMsg(msg, key, hopCount)
+                println("Self: " + selfNode.nodeId + " Routing " + strKey + " to Rare " + tmpArr(count).nodeId)
               }
             }
             count += 1
@@ -258,17 +261,15 @@ object Project3 {
 
     def updateNeighborSet(arr: Array[Node]) {
       var count = 0
-      while (count < arr.length) {
-        var id = arr(count).nodeId
-        // 0 implies empty cell
-        if (id > 0) {
-          if (neighborArr(0).nodeId == 0) {
-            neighborArr(0) = arr(count)
-          } else if ((selfNode.nodeId - id).abs < (selfNode.nodeId - neighborArr(0).nodeId).abs) {
-            neighborArr(0) = arr(count)
-          }
-          neighborArr.sortBy(a => a.nodeId)
+      var tmpArr = arr.filter(a => a.nodeId > 0) // filter empty cells
+      while (count < tmpArr.length) {
+        val tmpId = tmpArr(count).nodeRef.path.name.drop(6).toInt
+        if (neighborArr(0).nodeRef == null) {
+          neighborArr(0) = tmpArr(count)
+        } else if ((id - tmpId).abs < (id - neighborArr(0).nodeRef.path.name.drop(6).toInt).abs) {
+          neighborArr(0) = tmpArr(count)
         }
+        neighborArr.sortBy(a => a.nodeRef.path.name.drop(6).toInt)
         count += 1
       }
     }
@@ -277,13 +278,14 @@ object Project3 {
       var ctr = 0
       while (ctr < arr.length) {
         var itemId = arr(ctr).nodeId
+        var itemIdStr = getString(itemId)
         if (itemId > 0) {
-          var PrefixSize = shl(itemId.toString, selfNode.nodeId.toString)
-          var routingEntry = routingArr(PrefixSize)(itemId.toString()(PrefixSize))
+          var PrefixSize = shl(itemIdStr, getString(selfNode.nodeId))
+          var routingEntry = routingArr(PrefixSize)(itemIdStr(PrefixSize))
 
           if (routingEntry.nodeId > 0) {
             if ((selfNode.nodeId - itemId).abs < (selfNode.nodeId - routingEntry.nodeId).abs) {
-              routingArr(PrefixSize)(itemId.toString()(PrefixSize)) = arr(ctr)
+              routingArr(PrefixSize)(itemIdStr(PrefixSize)) = arr(ctr)
             }
           }
         }
@@ -295,7 +297,7 @@ object Project3 {
       if (hop == 0) {
         key.nodeRef ! RecieveStatus(neighborArr, "neighbor")
       }
-      var PrefixSize = shl(key.nodeId.toString, selfNode.nodeId.toString)
+      var PrefixSize = shl(getString(key.nodeId), getString(selfNode.nodeId))
       key.nodeRef ! RecieveStatus(routingArr(PrefixSize), "routing")
     }
 
@@ -349,6 +351,19 @@ object Project3 {
       return count
     }
 
+    // add leading zeros to the string
+    def getString(nodeId: Int): String = {
+      var id = nodeId.toString
+      var count = noOfBits - id.length()
+      var prefix = ""
+      while (count > 0) {
+        prefix += "0"
+        count -= 1
+      }
+      prefix += id
+      return prefix
+    }
+
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
       case Init =>
@@ -393,7 +408,7 @@ object Project3 {
           sendStatus(key, hopCount)
           if (!forwarded) {
             handler.deliver(msg, key, hopCount)
-            println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
+            //println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
             parent ! Watcher.VerifyDestination(key, selfNode)
             key.nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
           }
@@ -402,7 +417,7 @@ object Project3 {
       case FinalHopMsg(msg, key, hop) =>
         var hopCount = hop + 1
         handler.deliver(msg, key, hopCount)
-        println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
+        //println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
         // send appropriate routing table entries and leaf table
         if (msg == "join") {
           sendStatus(key, hopCount)
