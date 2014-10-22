@@ -41,7 +41,7 @@ object Project3 {
   class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
     import Watcher._
     import context._
-    var b = 2
+    var b = 3
     var mismatch = 0
 
     // keep track of actors.
@@ -69,7 +69,7 @@ object Project3 {
 
       case AddNewNode(node) =>
         nodesArr += node
-        println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
+      //println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
       // For Debugging Ask all the guys to print the pastry tables.
       //        var ctr1 = 0
       //        while (ctr1 < nodesArr.length) {
@@ -456,7 +456,7 @@ object Project3 {
           updateNeighborSet(arr)
         } else if (setType == "leaf") {
           updateLeafSet(arr)
-          // leaf node is received only join has reached final destination.
+          // leaf node is received only join has reached final destination. Send routing table to everyone, notify Watcher and become Alive.
           sendStatusAfterJoin()
           parent ! Watcher.AddNewNode(selfNode)
           become(Alive)
@@ -483,7 +483,7 @@ object Project3 {
           // if not forwarded, then this is final destination.
           if (!forwarded) {
             handler.deliver(msg, key, hopCount)
-            //println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
+            println("Delivered Node # " + key.nodeRef.path.name.drop(6).toInt + " with NodeId " + key.nodeId + " to Node # " + selfProxyId + " with NodeId " + selfNode.nodeId + " with hop count " + hopCount)
             parent ! Watcher.VerifyDestination(key, selfNode)
             key.nodeRef ! UpdateTable(leafArr ++ Array(selfNode), "leaf")
           }
