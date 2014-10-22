@@ -79,6 +79,11 @@ object Project3 {
         nodesArr += node
         nodesArr.sortBy(_.nodeRef.path.name.drop(6).toInt)
         println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
+        var count = 0
+        while (count < nodesArr.length) {
+          nodesArr(count).nodeRef ! Pastry.PrintTable
+          count += 1
+        }
 
       case VerifyDestination(key, actual) =>
         val tmp = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
@@ -125,6 +130,7 @@ object Project3 {
     case class RecieveStatus(arr: Array[Node], setType: String)
     case object Init
     case object FAILED
+    case object PrintTable
   }
 
   class Pastry(b: Int) extends Actor {
@@ -322,7 +328,7 @@ object Project3 {
         var col = 0
         while (col < routingArr(ctr).length) {
           if (routingArr(ctr)(col).nodeId > 0) {
-            routingArr(ctr)(col).nodeRef ! RecieveStatus(routingArr(ctr) ++ Array(selfNode), "neighbor")
+            routingArr(ctr)(col).nodeRef ! RecieveStatus(routingArr(ctr) ++ Array(selfNode), "routing")
           }
           col += 1
         }
@@ -364,9 +370,44 @@ object Project3 {
       return prefix
     }
 
+    def print() {
+      var ctr = 0
+      var str = "(leaf) Id: " + id + "::"
+      var tmpArr = leafArr.filter(a => a.nodeId > 0)
+      while (ctr < tmpArr.length) {
+        str += "\t" + tmpArr(ctr).nodeId
+        ctr += 1
+      }
+      println(str)
+
+      ctr = 0
+      str = "(neighbor) Id: " + id + "::"
+      tmpArr = neighborArr.filter(a => a.nodeId > 0)
+      while (ctr < tmpArr.length) {
+        str += "\t" + tmpArr(ctr).nodeId
+        ctr += 1
+      }
+      println(str)
+
+      ctr = 0
+      str = "(routing) Id: " + id + "::"
+      while (ctr < routingArr.length) {
+        var col = 0
+        while (col < routingArr(ctr).length) {
+          if (routingArr(ctr)(col).nodeId > 0) {
+            str += "\t" + routingArr(ctr)(col).nodeId
+          }
+          col += 1
+        }
+        ctr += 1
+      }
+      println(str)
+    }
+
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
       case Init =>
+        println("******************************************************************")
         pastryInit(new Application(self.path.name.drop(6).toInt))
 
       case RecieveLiveNeighbor(ref) =>
@@ -433,6 +474,9 @@ object Project3 {
         } else {
           updateRoutingSet(arr)
         }
+
+      case PrintTable =>
+        print()
     }
 
     // default state of Actor.
