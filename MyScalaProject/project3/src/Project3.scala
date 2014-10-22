@@ -237,32 +237,34 @@ object Project3 {
     } // end of method
 
     def updateLeafSet(arr: Array[Node]) {
-      var l = base / 2
-      var lr = leafArr.splitAt(l)
+      val size = base / 2
+      var lr = leafArr.splitAt(size)
+      var l = lr._1
+      var r = lr._2
       var count = 0
       while (count < arr.length) {
-        var id = arr(count).nodeId
+        var itemId = arr(count).nodeId
         // null implies empty cell
-        if (id > 0) {
-          if (id < selfNode.nodeId) {
-            if (id > lr._1(0).nodeId) {
-              lr._1(0) = arr(count)
-              lr._1.sortBy(a => a.nodeId)
+        if (itemId > 0) {
+          if (itemId < selfNode.nodeId) {
+            if (itemId > l(0).nodeId) {
+              l(0) = arr(count)
+              l = l.sortBy(a => a.nodeId)
             }
-          } else if (id > selfNode.nodeId) {
-            if (lr._2(0).nodeId == 0) {
-              lr._2(0) = arr(count)
-              lr._2.sortBy(a => a.nodeId)
-            } else if (id < lr._2.last.nodeId) {
-              lr._2(l - 1) = arr(count)
-              lr._2.sortBy(a => a.nodeId)
+          } else if (itemId > selfNode.nodeId) {
+            if (r(0).nodeId == 0) {
+              r(0) = arr(count)
+              r = r.sortBy(a => a.nodeId)
+            } else if (itemId < r.last.nodeId) {
+              r(size - 1) = arr(count)
+              r = r.sortBy(a => a.nodeId)
             }
           }
         }
         count += 1
       }
-      leafArr = lr._1
-      leafArr ++= lr._2
+      leafArr = l
+      leafArr ++= r
     }
 
     def updateNeighborSet(arr: Array[Node]) {
