@@ -52,7 +52,7 @@ object Project3 {
     // create array of all nodes (actors)    
     for (i <- 1 to noOfNodes) {
       var node = actorOf(Props(new Pastry(b)), name = "Worker" + i)
-      system.scheduler.scheduleOnce(20 * i milliseconds, node, Pastry.Init)
+      system.scheduler.scheduleOnce(50 * i milliseconds, node, Pastry.Init)
     }
     // end of constructor
 
@@ -72,12 +72,12 @@ object Project3 {
       case AddNewNode(node) =>
         nodesArr += node
         println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
-        // For Debugging Ask all the guys to print the pastry tables.
-        var ctr1 = 0
-        while (ctr1 < nodesArr.length) {
-          nodesArr(ctr1).nodeRef ! Pastry.PrintTable
-          ctr1 += 1
-        }
+      // For Debugging Ask all the guys to print the pastry tables.
+      //        var ctr1 = 0
+      //        while (ctr1 < nodesArr.length) {
+      //          nodesArr(ctr1).nodeRef ! Pastry.PrintTable
+      //          ctr1 += 1
+      //        }
 
       case VerifyDestination(key, actual) =>
         val expectedNode = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
@@ -184,7 +184,7 @@ object Project3 {
           tmp.nodeRef ! FinalHopMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
           found = true
         }
-      } // search in routing table.
+      } // search in routing table if not found in leaf table.
       else {
 
         // if appropriate entry found in routing Table, forward it.
@@ -209,6 +209,7 @@ object Project3 {
           tmpArr = tmpArr.filter(a => a != null && a.nodeId != -1)
 
           ctr3 = 0
+          // forward to node with minimum node difference with key. 
           var minimumNodeIdDiff = currNodeIdDiff
           var closestNode = selfNode
           while (ctr3 < tmpArr.length) {
@@ -224,6 +225,7 @@ object Project3 {
             }
             ctr3 += 1
           } // end of while
+          // if found, forward, else return false
           if (found) {
             handler.forward(msg, key, closestNode) // call to application.
             closestNode.nodeRef ! RouteMsg(msg, key, hopCount)
@@ -234,7 +236,9 @@ object Project3 {
       return found
     } // end of method
 
+    // update Leaf Set Table
     def updateLeafSet(arr: Array[Node]) {
+      // size param to limit size of left and right tables when updating.
       val size = base / 2
       var l = leafArr.filter(a => a.nodeId < selfNode.nodeId)
       var r = leafArr.filter(a => a.nodeId > selfNode.nodeId)
@@ -251,10 +255,12 @@ object Project3 {
         }
         count += 1
       }
+      // reassign updated tables to leafArr.
       leafArr = l
       leafArr ++= r
     }
 
+    // update Neighbor Set Table
     def updateNeighborSet(arr: Array[Node]) {
       var count = 0
       var tmpArr = arr.distinct
@@ -269,6 +275,7 @@ object Project3 {
       }
     }
 
+    // update routing table
     def updateRoutingSet(arr: Array[Node]) {
       var ctr = 0
       var tmpArr = arr.distinct
@@ -276,15 +283,18 @@ object Project3 {
         var item = tmpArr(ctr)
         var itemIdStr = getString(item.nodeId)
 
+        // if it is not the current nodeId, proceed
         if (item.nodeId != selfNode.nodeId) {
           var PrefixSize = shl(itemIdStr, getString(selfNode.nodeId))
           var routingEntry = routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0')
 
+          // if destination is not empty, check if absolute difference of nodeId is less than current item's nodeId.
           if (routingEntry != null) {
             if ((selfProxyId - item.nodeRef.path.name.drop(6).toInt).abs < (selfProxyId - routingEntry.nodeRef.path.name.drop(6).toInt).abs) {
               routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = item
             }
-          } else {
+          } // else, update
+          else {
             routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = item
           }
         }
@@ -292,7 +302,9 @@ object Project3 {
       }
     }
 
+    // send Appropriate tables, in each hop.
     def sendStatus(key: Node, hop: Int) {
+      // if this is the first hop, also send the neighbor table.
       if (hop == 0) {
         var tmpArr = neighborArr.filter(a => a != null && a.nodeId != -1)
         key.nodeRef ! UpdateTable(tmpArr ++ Array(selfNode), "neighbor")
@@ -302,7 +314,7 @@ object Project3 {
       key.nodeRef ! UpdateTable(tmpArr ++ Array(selfNode), "routing")
     }
 
-    // sent by the newly added node to all the nodes in its tables.
+    // sent by the newly added node's tables to all the nodes in its tables.
     def sendStatusAfterJoin() {
       var ctr = 0
       var tmpArr = leafArr
@@ -319,6 +331,7 @@ object Project3 {
       }
     }
 
+    // update leaf table with item if valid
     def updateLeafWithItemIfValid(item: Node, arr: Array[Node], size: Int): Array[Node] = {
       var l = arr
       // proceed only if element is not already present.
@@ -338,6 +351,7 @@ object Project3 {
       return l
     }
 
+    // update neighbor table with item if valid
     def updateNeighborWithItemIfValid(item: Node, arr: Array[Node], size: Int): Array[Node] = {
       var l = arr
       // proceed only if element is not already present.
@@ -391,6 +405,7 @@ object Project3 {
       return prefix
     }
 
+    // For debugging, print routing table of current node
     def print() {
       var ctr = 0
       var str = "(leaf) Id: " + selfProxyId + "::"
@@ -448,7 +463,6 @@ object Project3 {
           sendStatusAfterJoin()
           parent ! Watcher.AddNewNode(selfNode)
           become(Alive)
-
         } else if (setType == "routing") {
           updateRoutingSet(arr)
         } else if (setType == "all") {
@@ -469,6 +483,7 @@ object Project3 {
         // send appropriate routing table entries and leaf table
         if (msg == "join") {
           sendStatus(key, hopCount)
+          // if not forwarded, then this is final destination.
           if (!forwarded) {
             handler.deliver(msg, key, hopCount)
             //println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
