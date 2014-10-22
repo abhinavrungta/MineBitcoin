@@ -47,7 +47,7 @@ object Project3 {
     var mismatch = 0
 
     // keep track of actors.
-    val nodesArr = ArrayBuffer.empty[Pastry.Node]
+    var nodesArr = ArrayBuffer.empty[Pastry.Node]
 
     // create array of all nodes (actors)    
     for (i <- 1 to noOfNodes) {
@@ -77,7 +77,7 @@ object Project3 {
 
       case AddNewNode(node) =>
         nodesArr += node
-        nodesArr.sortBy(_.nodeRef.path.name.drop(6).toInt)
+        nodesArr = nodesArr.sortBy(_.nodeRef.path.name.drop(6).toInt)
         println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
         var count = 0
         while (count < nodesArr.length) {
@@ -270,12 +270,18 @@ object Project3 {
       var tmpArr = arr.filter(a => a.nodeId > 0) // filter empty cells
       while (count < tmpArr.length) {
         val tmpId = tmpArr(count).nodeRef.path.name.drop(6).toInt
-        if (neighborArr(0).nodeRef == null) {
-          neighborArr(0) = tmpArr(count)
-        } else if ((id - tmpId).abs < (id - neighborArr(0).nodeRef.path.name.drop(6).toInt).abs) {
-          neighborArr(0) = tmpArr(count)
+        if (tmpId != id) {
+
+          if (neighborArr(0).nodeRef == null) {
+            neighborArr(0) = tmpArr(count)
+            neighborArr = neighborArr.sortBy(a => a.nodeId)
+          } else {
+            neighborArr.sortBy(a => a.nodeRef.path.name.drop(6).toInt)
+            if ((id - tmpId).abs < (id - neighborArr(0).nodeRef.path.name.drop(6).toInt).abs) {
+              neighborArr(0) = tmpArr(count)
+            }
+          }
         }
-        neighborArr.sortBy(a => a.nodeRef.path.name.drop(6).toInt)
         count += 1
       }
     }
@@ -285,14 +291,15 @@ object Project3 {
       while (ctr < arr.length) {
         var itemId = arr(ctr).nodeId
         var itemIdStr = getString(itemId)
-        if (itemId > 0) {
+        if (itemId > 0 && itemId != id) {
           var PrefixSize = shl(itemIdStr, getString(selfNode.nodeId))
-          var routingEntry = routingArr(PrefixSize)(itemIdStr(PrefixSize))
-
+          var routingEntry = routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0')
           if (routingEntry.nodeId > 0) {
             if ((selfNode.nodeId - itemId).abs < (selfNode.nodeId - routingEntry.nodeId).abs) {
-              routingArr(PrefixSize)(itemIdStr(PrefixSize)) = arr(ctr)
+              routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = arr(ctr)
             }
+          } else if (routingEntry.nodeId == 0) {
+            routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = arr(ctr)
           }
         }
         ctr += 1
@@ -301,37 +308,24 @@ object Project3 {
 
     def sendStatus(key: Node, hop: Int) {
       if (hop == 0) {
-        key.nodeRef ! RecieveStatus(neighborArr, "neighbor")
+        key.nodeRef ! RecieveStatus(neighborArr ++ Array(selfNode), "neighbor")
       }
       var PrefixSize = shl(getString(key.nodeId), getString(selfNode.nodeId))
-      key.nodeRef ! RecieveStatus(routingArr(PrefixSize), "routing")
+      key.nodeRef ! RecieveStatus(routingArr(PrefixSize) ++ Array(selfNode), "routing")
     }
 
     // sent by the newly added node to all the nodes in its tables.
     def sendStatusAfterJoin() {
       var ctr = 0
-      while (ctr < leafArr.length) {
-        if (leafArr(ctr).nodeId > 0) {
-          leafArr(ctr).nodeRef ! RecieveStatus(leafArr ++ Array(selfNode), "leaf")
-        }
-        ctr += 1
+      var tmpArr = leafArr
+      tmpArr ++= neighborArr
+      for (ctr <- 0 to routingArr.length - 1) {
+        tmpArr ++= routingArr(ctr)
       }
+      tmpArr = tmpArr.filter(a => a.nodeId > 0)
       ctr = 0
-      while (ctr < neighborArr.length) {
-        if (neighborArr(ctr).nodeId > 0) {
-          neighborArr(ctr).nodeRef ! RecieveStatus(neighborArr ++ Array(selfNode), "neighbor")
-        }
-        ctr += 1
-      }
-      ctr = 0
-      while (ctr < routingArr.length) {
-        var col = 0
-        while (col < routingArr(ctr).length) {
-          if (routingArr(ctr)(col).nodeId > 0) {
-            routingArr(ctr)(col).nodeRef ! RecieveStatus(routingArr(ctr) ++ Array(selfNode), "routing")
-          }
-          col += 1
-        }
+      while (ctr < tmpArr.length) {
+        tmpArr(ctr).nodeRef ! RecieveStatus(tmpArr ++ Array(selfNode), "all")
         ctr += 1
       }
     }
@@ -431,7 +425,11 @@ object Project3 {
           parent ! Watcher.AddNewNode(selfNode)
           become(Alive)
 
-        } else {
+        } else if (setType == "routing") {
+          updateRoutingSet(arr)
+        } else if (setType == "all") {
+          updateNeighborSet(arr)
+          updateLeafSet(arr)
           updateRoutingSet(arr)
         }
 
@@ -471,7 +469,11 @@ object Project3 {
           updateNeighborSet(arr)
         } else if (setType == "leaf") {
           updateLeafSet(arr)
-        } else {
+        } else if (setType == "routing") {
+          updateRoutingSet(arr)
+        } else if (setType == "all") {
+          updateNeighborSet(arr)
+          updateLeafSet(arr)
           updateRoutingSet(arr)
         }
 
