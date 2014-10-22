@@ -12,8 +12,6 @@ import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
 
-// Think of tracking the messages being recd by the actors and shutdown entire system when recd atleast once.
-
 object Project3 {
   def main(args: Array[String]) {
     // exit if arguments not passed as command line param.
@@ -52,7 +50,7 @@ object Project3 {
     // create array of all nodes (actors)    
     for (i <- 1 to noOfNodes) {
       var node = actorOf(Props(new Pastry(b)), name = "Worker" + i)
-      system.scheduler.scheduleOnce(50 * i milliseconds, node, Pastry.Init)
+      system.scheduler.scheduleOnce(100 * i milliseconds, node, Pastry.Init)
     }
     // end of constructor
 
@@ -117,7 +115,6 @@ object Project3 {
   object Pastry {
     case class Node(var nodeId: Int, nodeRef: ActorRef)
     case class RouteMsg(msg: String, key: Node, hop: Int)
-    case class FinalHopMsg(msg: String, key: Node, hop: Int)
     case class LiveNeighbor(nodeRef: ActorRef)
     case class UpdateTable(arr: Array[Node], setType: String)
     case object Init
@@ -181,7 +178,7 @@ object Project3 {
           println("Self: " + selfNode.nodeId + " Routing " + key.nodeId + " to Leaf Node " + tmp.nodeId)
           // call to application.
           handler.forward(msg, key, tmp)
-          tmp.nodeRef ! FinalHopMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
+          tmp.nodeRef ! RouteMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
           found = true
         }
       } // search in routing table if not found in leaf table.
@@ -490,17 +487,6 @@ object Project3 {
             parent ! Watcher.VerifyDestination(key, selfNode)
             key.nodeRef ! UpdateTable(leafArr ++ Array(selfNode), "leaf")
           }
-        }
-
-      case FinalHopMsg(msg, key, hop) =>
-        var hopCount = hop + 1
-        handler.deliver(msg, key, hopCount)
-        //println("delivered " + key.nodeId + " to " + selfNode.nodeId + " with hop count " + hopCount)
-        // send appropriate routing table entries and leaf table
-        if (msg == "join") {
-          sendStatus(key, hopCount)
-          parent ! Watcher.VerifyDestination(key, selfNode)
-          key.nodeRef ! UpdateTable(leafArr ++ Array(selfNode), "leaf")
         }
 
       case UpdateTable(arr, setType) =>
