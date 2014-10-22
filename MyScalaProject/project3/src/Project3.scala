@@ -178,7 +178,7 @@ object Project3 {
           println("Self: " + selfNode.nodeId + " Routing " + key.nodeId + " to Leaf Node " + tmp.nodeId)
           // call to application.
           handler.forward(msg, key, tmp)
-          tmp.nodeRef ! RouteMsg(msg, key, hopCount) // current assumption is that final node will always be routed from the leaf set.
+          tmp.nodeRef ! RouteMsg(msg, key, hopCount)
           found = true
         }
       } // search in routing table if not found in leaf table.
@@ -477,14 +477,17 @@ object Project3 {
       case RouteMsg(msg, key, hop) =>
         var hopCount = hop + 1
         var forwarded = route(msg, key, hopCount)
-        // send appropriate routing table entries and leaf table
+        // if not forwarded, then this is the final destination.
+        if (!forwarded) {
+          handler.deliver(msg, key, hopCount)
+          println("Delivered Node # " + key.nodeRef.path.name.drop(6).toInt + " with NodeId " + key.nodeId + " to Node # " + selfProxyId + " with NodeId " + selfNode.nodeId + " with hop count " + hopCount)
+          parent ! Watcher.VerifyDestination(key, selfNode)
+        }
+        // if msg type is join, send appropriate routing table entries and leaf table.
         if (msg == "join") {
           sendStatus(key, hopCount)
-          // if not forwarded, then this is final destination.
+          // if not forwarded, then this is final destination, also send the leaf table.
           if (!forwarded) {
-            handler.deliver(msg, key, hopCount)
-            println("Delivered Node # " + key.nodeRef.path.name.drop(6).toInt + " with NodeId " + key.nodeId + " to Node # " + selfProxyId + " with NodeId " + selfNode.nodeId + " with hop count " + hopCount)
-            parent ! Watcher.VerifyDestination(key, selfNode)
             key.nodeRef ! UpdateTable(leafArr ++ Array(selfNode), "leaf")
           }
         }
