@@ -11,6 +11,7 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
+import akka.actor.Cancellable
 
 object Project3 {
   def main(args: Array[String]) {
@@ -26,13 +27,15 @@ object Project3 {
 
       // create actor system and a watcher actor
       val system = ActorSystem("Pastry")
+      /* creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
+       * Once that is done, it starts sending messages. */
       val watcher = system.actorOf(Props(new Watcher(numNodes, numRequests)), name = "Watcher")
     }
   }
 
   object Watcher {
     case class Terminate(node: Pastry.Node)
-    case object Initiate
+    case object RouteMessages
     case object SendLiveNeighbor
     case class AddNewNode(node: Pastry.Node)
     case class VerifyDestination(key: Pastry.Node, actual: Pastry.Node)
@@ -42,15 +45,22 @@ object Project3 {
     import Watcher._
     import context._
     var b = 3
+    var base = math.pow(2, b).toInt
+    var noOfBits = 8 // since we take only first 8 digits of a hash.
     var mismatch = 0
+    var cancellable: Cancellable = null
+    var count = 0
 
-    // keep track of actors.
+    // keep track of actors and application obj.
     var nodesArr = ArrayBuffer.empty[Pastry.Node]
+    var applicationArr = ArrayBuffer.empty[Application]
 
-    // create array of all nodes (actors)    
+    // create nodes (actors) and asks them to join to the n/w at intervals of 100 ms. It will then wait for all of them to join.    
     for (i <- 1 to noOfNodes) {
-      var node = actorOf(Props(new Pastry(b)), name = "Worker" + i)
-      system.scheduler.scheduleOnce(100 * i milliseconds, node, Pastry.Init)
+      var node = actorOf(Props(new Pastry(base, noOfBits)), name = "Worker" + i)
+      var app = new Application(node)
+      system.scheduler.scheduleOnce(100 * i milliseconds, node, Pastry.Init(app))
+      applicationArr += app
     }
     // end of constructor
 
@@ -67,16 +77,6 @@ object Project3 {
           sender ! Pastry.LiveNeighbor(closestNeighbor.nodeRef)
         }
 
-      case AddNewNode(node) =>
-        nodesArr += node
-      //println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
-      // For Debugging Ask all the guys to print the pastry tables.
-      //        var ctr1 = 0
-      //        while (ctr1 < nodesArr.length) {
-      //          nodesArr(ctr1).nodeRef ! Pastry.PrintTable
-      //          ctr1 += 1
-      //        }
-
       case VerifyDestination(key, actual) =>
         val expectedNode = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
         if (expectedNode.nodeId != actual.nodeId) {
@@ -86,6 +86,28 @@ object Project3 {
           println("Correct - Key: " + key.nodeId + " Expected: " + expectedNode.nodeId + " Actual: " + actual.nodeId)
         }
 
+      case AddNewNode(node) =>
+        nodesArr += node
+        // when all the nodes have joined, start routing messages. Call at intervals of 1 sec.
+        if (nodesArr.length == noOfNodes) {
+          cancellable = system.scheduler.schedule(0 seconds, 1000 milliseconds, self, RouteMessages)
+        }
+      //println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
+      // For Debugging Ask all the guys to print the pastry tables.
+      //        var ctr1 = 0
+      //        while (ctr1 < nodesArr.length) {
+      //          nodesArr(ctr1).nodeRef ! Pastry.PrintTable
+      //          ctr1 += 1
+      //        }
+
+      case RouteMessages =>
+        count += 1
+        println("sending msg")
+        if (count < noOfRequests) {
+          applicationArr.foreach(a => a.pastryRef ! Pastry.RouteMsg("route", new Pastry.Node(getRandomKey().toInt, Actor.noSender), -1))
+        } else {
+          cancellable.cancel
+        }
       // When Actors send Terminate Message to Watcher to remove from network.
       case Terminate(ref) =>
         nodesArr -= ref
@@ -96,9 +118,18 @@ object Project3 {
 
       case _ => println("FAILED HERE")
     }
+
+    private def getRandomKey(): String = {
+      val rnd = new scala.util.Random
+      var str = ""
+      (1 to noOfBits) foreach (x => str += rnd.nextInt(base))
+      return str
+    }
   }
 
-  class Application(nodeNumber: Int) {
+  class Application(nodeRef: ActorRef) {
+    var pastryRef: ActorRef = nodeRef
+
     def forward(msg: String, key: Pastry.Node, node: Pastry.Node) {
       /* TODO Template */
     }
@@ -117,31 +148,28 @@ object Project3 {
     case class RouteMsg(msg: String, key: Node, hop: Int)
     case class LiveNeighbor(nodeRef: ActorRef)
     case class UpdateTable(arr: Array[Node], setType: String)
-    case object Init
+    case class Init(handler: Application)
     case object FAILED
     case object PrintTable
   }
 
-  class Pastry(b: Int) extends Actor {
+  class Pastry(base: Int, noOfBits: Int) extends Actor {
     import context._
     import Pastry._
 
     /* Constructor Started */
-    val selfProxyId = self.path.name.drop(6).toInt
-    var selfNode = new Node(-1, self)
-    var handler: Application = null
-
-    var base = math.pow(2, b).toInt
-    var noOfBits = 8 // since we take only first 8 digits of a hash.
+    private val selfProxyId = self.path.name.drop(6).toInt
+    private var selfNode = new Node(-1, self)
+    private var handler: Application = null
 
     // declare state tables with default values as null
-    var leafArr = new Array[Node](0)
-    var neighborArr = new Array[Node](0)
-    var routingArr = Array.ofDim[Node](noOfBits, base)
+    private var leafArr = new Array[Node](0)
+    private var neighborArr = new Array[Node](0)
+    private var routingArr = Array.ofDim[Node](noOfBits, base)
 
     /* Constructor Ended */
 
-    // called by application to bring up Pastry node and add to the network.
+    // public method called by application to bring up Pastry node and add to the network.
     def pastryInit(handler: Application): Node = {
       this.handler = handler
       // take a crypto-hash and convert it to base 2^b. Then take first 8 bits of it.
@@ -163,7 +191,7 @@ object Project3 {
       return selfNode
     }
 
-    // route message to node with closest key value.
+    // Public method to route message to node with closest key value.
     def route(msg: String, key: Node, hopCount: Int = 0): Boolean = {
       var found = false
       val currNodeIdDiff = (key.nodeId - selfNode.nodeId).abs
@@ -234,7 +262,7 @@ object Project3 {
     } // end of method
 
     // update Leaf Set Table
-    def updateLeafSet(arr: Array[Node]) {
+    private def updateLeafSet(arr: Array[Node]) {
       // size param to limit size of left and right tables when updating.
       val size = base / 2
       var l = leafArr.filter(a => a.nodeId < selfNode.nodeId)
@@ -258,7 +286,7 @@ object Project3 {
     }
 
     // update Neighbor Set Table
-    def updateNeighborSet(arr: Array[Node]) {
+    private def updateNeighborSet(arr: Array[Node]) {
       var count = 0
       var tmpArr = arr.distinct
 
@@ -273,7 +301,7 @@ object Project3 {
     }
 
     // update routing table
-    def updateRoutingSet(arr: Array[Node]) {
+    private def updateRoutingSet(arr: Array[Node]) {
       var ctr = 0
       var tmpArr = arr.distinct
       while (ctr < tmpArr.length) {
@@ -300,7 +328,7 @@ object Project3 {
     }
 
     // send Appropriate tables, in each hop.
-    def sendStatus(key: Node, hop: Int) {
+    private def sendStatus(key: Node, hop: Int) {
       // if this is the first hop, also send the neighbor table.
       if (hop == 0) {
         var tmpArr = neighborArr.filter(a => a != null && a.nodeId != -1)
@@ -312,7 +340,7 @@ object Project3 {
     }
 
     // sent by the newly added node's tables to all the nodes in its tables.
-    def sendStatusAfterJoin() {
+    private def sendStatusAfterJoin() {
       var ctr = 0
       var tmpArr = leafArr
       tmpArr ++= neighborArr
@@ -329,7 +357,7 @@ object Project3 {
     }
 
     // update leaf table with item if valid
-    def updateLeafWithItemIfValid(item: Node, arr: Array[Node], size: Int): Array[Node] = {
+    private def updateLeafWithItemIfValid(item: Node, arr: Array[Node], size: Int): Array[Node] = {
       var l = arr
       // proceed only if element is not already present.
       if (l.indexOf(item) == -1) {
@@ -349,7 +377,7 @@ object Project3 {
     }
 
     // update neighbor table with item if valid
-    def updateNeighborWithItemIfValid(item: Node, arr: Array[Node], size: Int): Array[Node] = {
+    private def updateNeighborWithItemIfValid(item: Node, arr: Array[Node], size: Int): Array[Node] = {
       var l = arr
       // proceed only if element is not already present.
       if (l.indexOf(item) == -1) {
@@ -369,7 +397,7 @@ object Project3 {
     }
 
     // converts to base.
-    def convertDecimaltoBase(no: Int, base: Int): String = {
+    private def convertDecimaltoBase(no: Int, base: Int): String = {
       var tmp = no
       var str = ""
       while (tmp >= base) {
@@ -381,7 +409,7 @@ object Project3 {
     }
 
     // returns length of max prefix.
-    def shl(key: String, nodeId: String): Int = {
+    private def shl(key: String, nodeId: String): Int = {
       var count = 0
       while (count < noOfBits - 1 && (key(count) == nodeId(count))) {
         count += 1
@@ -390,7 +418,7 @@ object Project3 {
     }
 
     // add leading zeros to the string
-    def getString(nodeId: Int): String = {
+    private def getString(nodeId: Int): String = {
       var id = nodeId.toString
       var count = noOfBits - id.length()
       var prefix = ""
@@ -403,7 +431,7 @@ object Project3 {
     }
 
     // For debugging, print routing table of current node
-    def print() {
+    private def print() {
       var ctr = 0
       var str = "(leaf) Id: " + selfProxyId + "::"
       while (ctr < leafArr.length) {
@@ -437,9 +465,9 @@ object Project3 {
 
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
-      case Init =>
+      case Init(applicationHandler) =>
         println("******************************************************************")
-        pastryInit(new Application(self.path.name.drop(6).toInt))
+        pastryInit(applicationHandler)
 
       case LiveNeighbor(ref) =>
         if (ref != null) {
@@ -480,7 +508,7 @@ object Project3 {
         // if not forwarded, then this is the final destination.
         if (!forwarded) {
           handler.deliver(msg, key, hopCount)
-          println("Delivered Node # " + key.nodeRef.path.name.drop(6).toInt + " with NodeId " + key.nodeId + " to Node # " + selfProxyId + " with NodeId " + selfNode.nodeId + " with hop count " + hopCount)
+          println("Delivered Msg Type " + msg + " with NodeId " + key.nodeId + " to Node # " + selfProxyId + " with NodeId " + selfNode.nodeId + " with hop count " + hopCount)
           parent ! Watcher.VerifyDestination(key, selfNode)
         }
         // if msg type is join, send appropriate routing table entries and leaf table.
