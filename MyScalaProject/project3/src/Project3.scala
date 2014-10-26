@@ -38,7 +38,7 @@ object Project3 {
     case object RouteMessages
     case object SendLiveNeighbor
     case class AddNewNode(node: Pastry.Node)
-    case class VerifyDestination(key: Pastry.Node, actual: Pastry.Node)
+    case class VerifyDestination(key: Pastry.Node, actual: Pastry.Node, msg: String, hops: Int)
   }
 
   class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
@@ -50,22 +50,33 @@ object Project3 {
     var mismatch = 0
     var cancellable: Cancellable = null
     var count = 0
-
+    // initialize totalHops Map for all the msg.
+    var totalHops = scala.collection.mutable.Map[String, Int]()
+    totalHops("join") = 0
+    for (i <- 1 to noOfRequests) {
+      totalHops("route" + i) = 0
+    }
     // keep track of actors and application obj.
     var nodesArr = ArrayBuffer.empty[Pastry.Node]
     var applicationArr = ArrayBuffer.empty[Application]
 
-    // create nodes (actors) and asks them to join to the n/w at intervals of 100 ms. It will then wait for all of them to join.    
-    for (i <- 1 to noOfNodes) {
-      var node = actorOf(Props(new Pastry(base, noOfBits)), name = "Worker" + i)
-      var app = new Application(node)
-      system.scheduler.scheduleOnce(100 * i milliseconds, node, Pastry.Init(app))
+    // create nodes (actors) and asks them to join to the n/w at intervals of 10 ms. It will then wait for all of them to join.
+    // add first actor immediately and the rest after a second.
+    var node = actorOf(Props(new Pastry(base, noOfBits)), name = "Worker1")
+    var app = new Application(node)
+    system.scheduler.scheduleOnce(0 milliseconds, node, Pastry.Init(app))
+    applicationArr += app
+
+    for (i <- 2 to noOfNodes) {
+      node = actorOf(Props(new Pastry(base, noOfBits)), name = "Worker" + i)
+      app = new Application(node)
+      system.scheduler.scheduleOnce(1000 + 10 * i milliseconds, node, Pastry.Init(app))
       applicationArr += app
     }
     // end of constructor
 
     // Receive block for the Watcher.
-    final def receive = {
+    final def receive = LoggingReceive {
 
       case SendLiveNeighbor =>
         // if it is the first node, nodesArr will be empty.
@@ -77,7 +88,8 @@ object Project3 {
           sender ! Pastry.LiveNeighbor(closestNeighbor.nodeRef)
         }
 
-      case VerifyDestination(key, actual) =>
+      case VerifyDestination(key, actual, msg, hop) =>
+        totalHops(msg) = totalHops(msg) + hop
         val expectedNode = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
         if (expectedNode.nodeId != actual.nodeId) {
           println("ERROR - Key: " + key.nodeId + " Expected: " + expectedNode.nodeId + " Actual: " + actual.nodeId)
@@ -102,17 +114,13 @@ object Project3 {
 
       case RouteMessages =>
         count += 1
-        println("sending msg")
-        if (count < noOfRequests) {
-          applicationArr.foreach(a => a.pastryRef ! Pastry.RouteMsg("route", new Pastry.Node(getRandomKey().toInt, Actor.noSender), -1))
+        if (count <= noOfRequests) {
+          println("sending msg")
+          applicationArr.foreach(a => a.pastryRef ! Pastry.RouteMsg("route" + count, new Pastry.Node(getRandomKey().toInt, Actor.noSender), -1))
         } else {
           cancellable.cancel
-        }
-      // When Actors send Terminate Message to Watcher to remove from network.
-      case Terminate(ref) =>
-        nodesArr -= ref
-        // when all actors are down, shutdown the system.
-        if (nodesArr.isEmpty) {
+          println("mismatched routes " + mismatch)
+          totalHops.foreach { keyVal => println(keyVal._1 + "=" + keyVal._2) }
           context.system.shutdown
         }
 
@@ -501,7 +509,7 @@ object Project3 {
     }
 
     // Receive block when in Alive State.
-    def Alive: Receive = {
+    def Alive: Receive = LoggingReceive {
       case RouteMsg(msg, key, hop) =>
         var hopCount = hop + 1
         var forwarded = route(msg, key, hopCount)
@@ -509,7 +517,7 @@ object Project3 {
         if (!forwarded) {
           handler.deliver(msg, key, hopCount)
           println("Delivered Msg Type " + msg + " with NodeId " + key.nodeId + " to Node # " + selfProxyId + " with NodeId " + selfNode.nodeId + " with hop count " + hopCount)
-          parent ! Watcher.VerifyDestination(key, selfNode)
+          parent ! Watcher.VerifyDestination(key, selfNode, msg, hopCount)
         }
         // if msg type is join, send appropriate routing table entries and leaf table.
         if (msg == "join") {
