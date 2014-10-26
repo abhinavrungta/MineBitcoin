@@ -50,6 +50,7 @@ object Project3 {
     var mismatch = 0
     var cancellable: Cancellable = null
     var count = 0
+    var noOfMsgRouted = 0
     // initialize totalHops Map for all the msg.
     var totalHops = scala.collection.mutable.Map[String, Int]()
     totalHops("join") = 0
@@ -97,6 +98,12 @@ object Project3 {
         } else {
           println("Correct - Key: " + key.nodeId + " Expected: " + expectedNode.nodeId + " Actual: " + actual.nodeId)
         }
+        noOfMsgRouted += 1
+        if (noOfMsgRouted == (noOfNodes * (1 + noOfRequests) - 1)) {
+          println("mismatched routes " + mismatch)
+          totalHops.foreach { keyVal => println(keyVal._1 + "=" + keyVal._2) }
+          context.system.shutdown
+        }
 
       case AddNewNode(node) =>
         nodesArr += node
@@ -119,9 +126,6 @@ object Project3 {
           applicationArr.foreach(a => a.pastryRef ! Pastry.RouteMsg("route" + count, new Pastry.Node(getRandomKey().toInt, Actor.noSender), -1))
         } else {
           cancellable.cancel
-          println("mismatched routes " + mismatch)
-          totalHops.foreach { keyVal => println(keyVal._1 + "=" + keyVal._2) }
-          context.system.shutdown
         }
 
       case _ => println("FAILED HERE")
