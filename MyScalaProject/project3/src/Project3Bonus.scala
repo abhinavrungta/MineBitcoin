@@ -1,12 +1,10 @@
 package project3.src;
 
 import java.security.MessageDigest
-
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
 import scala.util.control.Breaks.break
 import scala.util.control.Breaks.breakable
-
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
@@ -14,6 +12,7 @@ import akka.actor.Cancellable
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
+import scala.util.Random
 
 object Project3Bonus {
   def main(args: Array[String]) {
@@ -26,7 +25,7 @@ object Project3Bonus {
     } else if (args.length == 2) {
       var numNodes = args(0).toInt
       var numRequests = args(1).toInt
-      var failureRate = 20
+      var failureRate = 5
 
       // create actor system and a watcher actor
       val system = ActorSystem("Pastry")
@@ -104,7 +103,22 @@ object Project3Bonus {
         // when all the nodes have joined, start routing messages.
         if (nodesArr.length == noOfNodes) {
           applicationArr.foreach(a => a.pastryRef ! Pastry.InitiateMultipleRequests(noOfRequests))
+
+          // Also schedule some nodes to fail, after a little delay.
+          var total = nodesArr.length * failureRate / 100
+          var fc = total
+          val rand = new Random(System.currentTimeMillis())
+
+          var tmpRefArr = applicationArr
+          println("scheduling failure")
+          while (fc > 0 && tmpRefArr.length > 0) {
+            var tmp = tmpRefArr(rand.nextInt(tmpRefArr.length))
+            system.scheduler.scheduleOnce(1000 milliseconds, tmp.pastryRef, Pastry.FAILED)
+            tmpRefArr -= tmp
+            fc -= 1
+          }
         }
+
       //println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
       // For Debugging Ask all the guys to print the pastry tables.
       //        var ctr1 = 0
@@ -685,6 +699,11 @@ object Project3Bonus {
             parent ! Watcher.Terminate(selfNode)
           }
         }
+
+      case FAILED =>
+        cancellable.cancel
+        parent ! Watcher.Terminate(selfNode)
+        become(Dead)
 
       case PrintTable =>
         print()
