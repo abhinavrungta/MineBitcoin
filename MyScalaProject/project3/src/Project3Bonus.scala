@@ -25,7 +25,7 @@ object Project3Bonus {
     } else if (args.length == 2) {
       var numNodes = args(0).toInt
       var numRequests = args(1).toInt
-      var failureRate = 5
+      var failureRate = 10
 
       // create actor system and a watcher actor
       val system = ActorSystem("Pastry")
@@ -725,7 +725,7 @@ object Project3Bonus {
 
       case RouteMsg(msg, key, hop) =>
         if (hop != -1) {
-          sender ! UseAlternateRoute(msg, key, hop)
+          sender ! UseAlternateRoute(msg, key, hop + 1)
         }
 
       case RequestingTable(tabletype, row, col, currRow) =>
