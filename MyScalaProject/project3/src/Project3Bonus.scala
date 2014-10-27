@@ -49,6 +49,7 @@ object Project3Bonus {
     var base = math.pow(2, b).toInt
     var noOfBits = 8 // since we take only first 8 digits of a hash.
     var mismatch = 0
+    var noOfMsg = 0
     // initialize totalHops Map for all the msg.
     var totalHops = scala.collection.mutable.Map[String, Int]()
     totalHops("join") = 0
@@ -89,6 +90,7 @@ object Project3Bonus {
         }
 
       case VerifyDestination(key, actual, msg, hop) =>
+        noOfMsg += 1
         totalHops(msg) = totalHops(msg) + hop
         val expectedNode = nodesArr.minBy(a => (key.nodeId - a.nodeId).abs)
         if (expectedNode.nodeId != actual.nodeId) {
@@ -102,7 +104,7 @@ object Project3Bonus {
         nodesArr += node
         // when all the nodes have joined, start routing messages.
         if (nodesArr.length == noOfNodes) {
-          applicationArr.foreach(a => a.pastryRef ! Pastry.InitiateMultipleRequests(noOfRequests))
+          applicationArr.foreach(a => system.scheduler.scheduleOnce(500 milliseconds, a.pastryRef, Pastry.InitiateMultipleRequests(noOfRequests)))
 
           // Also schedule some nodes to fail, after a little delay.
           var total = nodesArr.length * failureRate / 100
@@ -113,7 +115,7 @@ object Project3Bonus {
           println("scheduling failure")
           while (fc > 0 && tmpRefArr.length > 0) {
             var tmp = tmpRefArr(rand.nextInt(tmpRefArr.length))
-            system.scheduler.scheduleOnce(1000 milliseconds, tmp.pastryRef, Pastry.FAILED)
+            system.scheduler.scheduleOnce(2000 milliseconds, tmp.pastryRef, Pastry.FAILED)
             tmpRefArr -= tmp
             fc -= 1
           }
@@ -130,9 +132,11 @@ object Project3Bonus {
       case Terminate(node) =>
         nodesArr -= node
         val finalTime = System.currentTimeMillis()
+        println("No of Alive Nodes " + nodesArr.length)
         // when all actors are down, shutdown the system.
         if (nodesArr.isEmpty) {
           println("Final:" + (finalTime - startTime))
+          println("No of Msgs " + noOfMsg)
           println("mismatched routes " + mismatch)
           totalHops.foreach { keyVal => println(keyVal._1 + "=" + keyVal._2) }
           context.system.shutdown
@@ -241,17 +245,15 @@ object Project3Bonus {
         }
       } // search in routing table if not found in leaf table.
       else {
-
         // if appropriate entry found in routing Table, forward it.
         var currPrefixSize = shl(getString(key.nodeId), getString(selfNode.nodeId))
         var routingEntry = routingArr(currPrefixSize)(getString(key.nodeId)(currPrefixSize) - '0')
-        if (routingEntry != null) {
+        if (routingEntry != null && routingEntry.nodeId != -2) {
           println("Self: " + selfNode.nodeId + " Routing " + key.nodeId + " to Routing Table " + routingEntry.nodeId)
           // call to application.
           handler.forward(msg, key, routingEntry)
           routingEntry.nodeRef ! RouteMsg(msg, key, hopCount)
           found = true
-
         } // else, search all the data sets.        
         else {
           var ctr3 = 0
@@ -450,6 +452,7 @@ object Project3Bonus {
             if (routingArr(ctr)(col) != null && routingArr(ctr)(col).nodeRef == ref) {
               updateFailedNodeInRouting = true
               NodeId = routingArr(ctr)(col).nodeId
+              println("DEBUG " + selfNode.nodeId + "  " + routingArr(ctr)(col).nodeId + "    " + ctr + "    " + col)
               routingArr(ctr)(col).nodeId = -2
               break
             }
@@ -648,7 +651,7 @@ object Project3Bonus {
 
       case UpdateFailedRoutingTable(arr, row, col, currRow) =>
         if (arr.length == 0) {
-          if (routingArr(row)(col) != null && routingArr(row)(col).nodeId != -2) {
+          if (routingArr(row)(col) != null && routingArr(row)(col).nodeId == -2) {
             if (currRow + 1 < noOfBits) {
               var tmp = routingArr(currRow + 1).filter(a => a != null && a.nodeId != -1 && a.nodeId != -2)
               tmp.foreach(a => a.nodeRef ! RequestingTable("routing", row, col, currRow + 1))
@@ -690,6 +693,9 @@ object Project3Bonus {
 
       case SendMessage =>
         count += 1
+        // piggy backing on this message to check for Alive Neighbors
+        var tmpArr = neighborArr.foreach(a => a.nodeRef ! CheckIfAlive)
+        // send normal msg request.
         if (count <= requests) {
           self ! RouteMsg("route" + count, new Node(getRandomKey().toInt, Actor.noSender), -1)
         } else {
