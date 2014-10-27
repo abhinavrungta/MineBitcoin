@@ -340,8 +340,7 @@ object Project3 {
     private def sendStatus(key: Node, hop: Int) {
       // if this is the first hop, also send the neighbor table.
       if (hop == 0) {
-        var tmpArr = neighborArr.filter(a => a != null && a.nodeId != -1)
-        key.nodeRef ! UpdateTable(tmpArr ++ Array(selfNode), "neighbor")
+        key.nodeRef ! UpdateTable(neighborArr ++ Array(selfNode), "neighbor")
       }
       var PrefixSize = shl(getString(key.nodeId), getString(selfNode.nodeId))
       var tmpArr = routingArr(PrefixSize).filter(a => a != null && a.nodeId != -1)

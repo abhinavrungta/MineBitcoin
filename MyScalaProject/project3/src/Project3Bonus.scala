@@ -166,7 +166,8 @@ object Project3Bonus {
     case object CheckIfAlive
     case class isAliveResponse(bool: Boolean)
     case class UseAlternateRoute(msg: String, key: Node, hop: Int)
-    case class RequestingTable(msg: String, row: Int = 0, col: Int = 0)
+    case class RequestingTable(msg: String, row: Int = 0, col: Int = 0, currentRow: Int = 0)
+    case class UpdateFailedRoutingTable(arr: Array[Node], row: Int, col: Int, currentRow: Int = 0)
     case object FAILED
     case object PrintTable
   }
@@ -219,7 +220,6 @@ object Project3Bonus {
       val currNodeIdDiff = (key.nodeId - selfNode.nodeId).abs
 
       var tmpArr = leafArr.sortBy(a => a.nodeId)
-      tmpArr = tmpArr.filter(a => a != null && a.nodeId != -1)
       // if found in leaf set.
       if (tmpArr.length > 0 && key.nodeId >= tmpArr.head.nodeId && key.nodeId <= tmpArr.last.nodeId) {
 
@@ -335,11 +335,11 @@ object Project3Bonus {
 
           // if destination is not empty, check if absolute difference of nodeId is less than current item's nodeId.
           if (routingEntry != null) {
-            if ((selfProxyId - item.nodeRef.path.name.drop(6).toInt).abs < (selfProxyId - routingEntry.nodeRef.path.name.drop(6).toInt).abs) {
-              routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = item
-            }
             // if the current node is not alive anymore, update anyways.
             if (routingEntry.nodeId == -2) {
+              routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = item
+            }
+            if ((selfProxyId - item.nodeRef.path.name.drop(6).toInt).abs < (selfProxyId - routingEntry.nodeRef.path.name.drop(6).toInt).abs) {
               routingArr(PrefixSize)(itemIdStr(PrefixSize) - '0') = item
             }
           } // else, update
@@ -355,8 +355,7 @@ object Project3Bonus {
     private def sendStatus(key: Node, hop: Int) {
       // if this is the first hop, also send the neighbor table.
       if (hop == 0) {
-        var tmpArr = neighborArr.filter(a => a != null && a.nodeId != -1)
-        key.nodeRef ! UpdateTable(tmpArr ++ Array(selfNode), "neighbor")
+        key.nodeRef ! UpdateTable(neighborArr ++ Array(selfNode), "neighbor")
       }
       var PrefixSize = shl(getString(key.nodeId), getString(selfNode.nodeId))
       var tmpArr = routingArr(PrefixSize).filter(a => a != null && a.nodeId != -1 && a.nodeId != -2)
@@ -457,6 +456,7 @@ object Project3Bonus {
 
     // replace Failed Nodes from All tables -> leaf, routing, neighborhood
     private def replaceFailedNodes(id: Int, ref: ActorRef) {
+      // if failed node detected in Leaf Table.
       if (updateFailedNodeInLeaf) {
         var l = leafArr.filter(a => a.nodeId < selfNode.nodeId)
         var r = leafArr.filter(a => a.nodeId > selfNode.nodeId)
@@ -475,18 +475,20 @@ object Project3Bonus {
         }
         updateFailedNodeInLeaf = false
       }
+      // if failed node detected in NeighborHood Table.
       if (updateFailedNodeInNeighbor) {
         neighborArr.foreach(a => a.nodeRef ! RequestingTable("neighbor"))
         updateFailedNodeInNeighbor = false
       }
+      // if failed node detected in Routing Table.
       if (updateFailedNodeInRouting) {
         var itemIdStr = getString(id)
         var PrefixSize = shl(itemIdStr, getString(selfNode.nodeId))
         var column = itemIdStr(PrefixSize) - '0'
         var routingEntry = routingArr(PrefixSize)(column)
         if (routingEntry.nodeId == -2) {
-          var tmp = routingArr(PrefixSize).filter(a => a.nodeId != -1 && a.nodeId != -2)
-          tmp.foreach(a => a.nodeRef ! RequestingTable("neighbor", PrefixSize, column))
+          var tmp = routingArr(PrefixSize).filter(a => a != null && a.nodeId != -1 && a.nodeId != -2)
+          tmp.foreach(a => a.nodeRef ! RequestingTable("routing", PrefixSize, column, PrefixSize))
         }
 
         updateFailedNodeInRouting = false
@@ -630,6 +632,18 @@ object Project3Bonus {
           updateRoutingSet(arr)
         }
 
+      case UpdateFailedRoutingTable(arr, row, col, currRow) =>
+        if (arr.length == 0) {
+          if (routingArr(row)(col) != null && routingArr(row)(col).nodeId != -2) {
+            if (currRow + 1 < noOfBits) {
+              var tmp = routingArr(currRow + 1).filter(a => a != null && a.nodeId != -1 && a.nodeId != -2)
+              tmp.foreach(a => a.nodeRef ! RequestingTable("routing", row, col, currRow + 1))
+            }
+          }
+        } else {
+          updateRoutingSet(arr)
+        }
+
       case CheckIfAlive =>
         sender ! isAliveResponse(true)
 
@@ -645,7 +659,16 @@ object Project3Bonus {
         var forwarded = route(msg, key, hop)
         replaceFailedNodes(id, sender)
 
-      case RequestingTable(tabletype, row, col) =>
+      case RequestingTable(tabletype, row, col, currRow) =>
+        if (tabletype == "leaf") {
+          sender ! UpdateTable(leafArr, "leaf")
+        } else if (tabletype == "neighbor") {
+          sender ! UpdateTable(neighborArr, "neighbor")
+        } else if (tabletype == "routing") {
+          var arr = Array(routingArr(row)(col))
+          arr = arr.filter(a => a != null && a.nodeId != -1 && a.nodeId != -2)
+          sender ! UpdateFailedRoutingTable(arr, row, col, currRow)
+        }
 
       case PrintTable =>
         print()
@@ -659,7 +682,10 @@ object Project3Bonus {
       case RouteMsg(msg, key, hop) =>
         sender ! UseAlternateRoute(msg, key, hop)
 
-      case _ => println("FAILED")
+      case RequestingTable(tabletype, row, col, currRow) =>
+        sender ! isAliveResponse(false)
+
+      case _ => println("FAILED AGAIN")
 
     }
     // default state of Actor.
