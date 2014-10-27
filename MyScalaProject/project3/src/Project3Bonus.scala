@@ -107,8 +107,7 @@ object Project3Bonus {
           applicationArr.foreach(a => system.scheduler.scheduleOnce(500 milliseconds, a.pastryRef, Pastry.InitiateMultipleRequests(noOfRequests)))
 
           // Also schedule some nodes to fail, after a little delay.
-          var total = nodesArr.length * failureRate / 100
-          var fc = total
+          var fc = applicationArr.length * failureRate / 100
           val rand = new Random(System.currentTimeMillis())
 
           var tmpRefArr = applicationArr
@@ -449,7 +448,7 @@ object Project3Bonus {
         while (ctr < routingArr.length) {
           var col = 0
           while (col < routingArr(ctr).length) {
-            if (routingArr(ctr)(col) != null && routingArr(ctr)(col).nodeRef == ref) {
+            if (routingArr(ctr)(col) != null && routingArr(ctr)(col).nodeRef == ref && routingArr(ctr)(col).nodeId != -2) {
               updateFailedNodeInRouting = true
               NodeId = routingArr(ctr)(col).nodeId
               println("DEBUG " + selfNode.nodeId + "  " + routingArr(ctr)(col).nodeId + "    " + ctr + "    " + col)
@@ -473,14 +472,18 @@ object Project3Bonus {
 
         // if item < selfNodeId, it possibly goes in left array.
         if (id < selfNode.nodeId) {
-          var tmp = l.minBy(a => a.nodeId)
-          if (tmp != null) {
-            tmp.nodeRef ! RequestingTable("leaf")
+          if (l.length > 0) {
+            var tmp = l.minBy(a => a.nodeId)
+            if (tmp != null) {
+              tmp.nodeRef ! RequestingTable("leaf")
+            }
           }
         } else if (id > selfNode.nodeId) {
-          var tmp = r.maxBy(a => a.nodeId)
-          if (tmp != null) {
-            tmp.nodeRef ! RequestingTable("leaf")
+          if (r.length > 0) {
+            var tmp = r.maxBy(a => a.nodeId)
+            if (tmp != null) {
+              tmp.nodeRef ! RequestingTable("leaf")
+            }
           }
         }
         updateFailedNodeInLeaf = false
@@ -726,7 +729,7 @@ object Project3Bonus {
         }
 
       case RequestingTable(tabletype, row, col, currRow) =>
-        sender ! isAliveResponse(false)
+      //sender ! isAliveResponse(false)
 
       case SendMessage =>
         cancellable.cancel
