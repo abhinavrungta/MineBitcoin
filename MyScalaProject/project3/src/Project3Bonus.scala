@@ -26,33 +26,30 @@ object Project3Bonus {
     } else if (args.length == 2) {
       var numNodes = args(0).toInt
       var numRequests = args(1).toInt
+      var failureRate = 20
 
       // create actor system and a watcher actor
       val system = ActorSystem("Pastry")
       /* creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
        * Once that is done, it starts sending messages. */
-      val watcher = system.actorOf(Props(new Watcher(numNodes, numRequests)), name = "Watcher")
+      val watcher = system.actorOf(Props(new Watcher(numNodes, numRequests, failureRate)), name = "Watcher")
     }
   }
 
   object Watcher {
     case class Terminate(node: Pastry.Node)
-    case object RouteMessages
     case object SendLiveNeighbor
     case class AddNewNode(node: Pastry.Node)
     case class VerifyDestination(key: Pastry.Node, actual: Pastry.Node, msg: String, hops: Int)
   }
 
-  class Watcher(noOfNodes: Int, noOfRequests: Int) extends Actor {
+  class Watcher(noOfNodes: Int, noOfRequests: Int, failureRate: Int = 0) extends Actor {
     import Watcher._
     import context._
     var b = 3
     var base = math.pow(2, b).toInt
     var noOfBits = 8 // since we take only first 8 digits of a hash.
     var mismatch = 0
-    var cancellable: Cancellable = null
-    var count = 0
-    var noOfMsgRouted = 0
     // initialize totalHops Map for all the msg.
     var totalHops = scala.collection.mutable.Map[String, Int]()
     totalHops("join") = 0
@@ -76,6 +73,7 @@ object Project3Bonus {
       system.scheduler.scheduleOnce(1000 + 10 * i milliseconds, node, Pastry.Init(app))
       applicationArr += app
     }
+    var startTime = System.currentTimeMillis()
     // end of constructor
 
     // Receive block for the Watcher.
@@ -100,18 +98,12 @@ object Project3Bonus {
         } else {
           println("Correct - Key: " + key.nodeId + " Expected: " + expectedNode.nodeId + " Actual: " + actual.nodeId)
         }
-        noOfMsgRouted += 1
-        if (noOfMsgRouted == (noOfNodes * (1 + noOfRequests) - 1)) {
-          println("mismatched routes " + mismatch)
-          totalHops.foreach { keyVal => println(keyVal._1 + "=" + keyVal._2) }
-          context.system.shutdown
-        }
 
       case AddNewNode(node) =>
         nodesArr += node
-        // when all the nodes have joined, start routing messages. Call at intervals of 1 sec.
+        // when all the nodes have joined, start routing messages.
         if (nodesArr.length == noOfNodes) {
-          cancellable = system.scheduler.schedule(0 seconds, 1000 milliseconds, self, RouteMessages)
+          applicationArr.foreach(a => a.pastryRef ! Pastry.InitiateMultipleRequests(noOfRequests))
         }
       //println("Added node " + node.nodeRef.path.name.drop(6) + " with nodeId " + node.nodeId)
       // For Debugging Ask all the guys to print the pastry tables.
@@ -121,23 +113,18 @@ object Project3Bonus {
       //          ctr1 += 1
       //        }
 
-      case RouteMessages =>
-        count += 1
-        if (count <= noOfRequests) {
-          println("sending msg")
-          applicationArr.foreach(a => a.pastryRef ! Pastry.RouteMsg("route" + count, new Pastry.Node(getRandomKey().toInt, Actor.noSender), -1))
-        } else {
-          cancellable.cancel
+      case Terminate(node) =>
+        nodesArr -= node
+        val finalTime = System.currentTimeMillis()
+        // when all actors are down, shutdown the system.
+        if (nodesArr.isEmpty) {
+          println("Final:" + (finalTime - startTime))
+          println("mismatched routes " + mismatch)
+          totalHops.foreach { keyVal => println(keyVal._1 + "=" + keyVal._2) }
+          context.system.shutdown
         }
 
       case _ => println("FAILED HERE")
-    }
-
-    private def getRandomKey(): String = {
-      val rnd = new scala.util.Random
-      var str = ""
-      (1 to noOfBits) foreach (x => str += rnd.nextInt(base))
-      return str
     }
   }
 
@@ -168,6 +155,8 @@ object Project3Bonus {
     case class UseAlternateRoute(msg: String, key: Node, hop: Int)
     case class RequestingTable(msg: String, row: Int = 0, col: Int = 0, currentRow: Int = 0)
     case class UpdateFailedRoutingTable(arr: Array[Node], row: Int, col: Int, currentRow: Int = 0)
+    case class InitiateMultipleRequests(noOfReq: Int = 0)
+    case object SendMessage
     case object FAILED
     case object PrintTable
   }
@@ -189,6 +178,10 @@ object Project3Bonus {
     private var updateFailedNodeInLeaf = false
     private var updateFailedNodeInNeighbor = false
     private var updateFailedNodeInRouting = false
+
+    private var cancellable: Cancellable = null
+    private var count = 0
+    private var requests = 0
 
     /* Constructor Ended */
 
@@ -529,6 +522,13 @@ object Project3Bonus {
       return prefix
     }
 
+    private def getRandomKey(): String = {
+      val rnd = new scala.util.Random
+      var str = ""
+      (1 to noOfBits) foreach (x => str += rnd.nextInt(base))
+      return str
+    }
+
     // For debugging, print routing table of current node
     private def print() {
       var ctr = 0
@@ -670,6 +670,22 @@ object Project3Bonus {
           sender ! UpdateFailedRoutingTable(arr, row, col, currRow)
         }
 
+      case InitiateMultipleRequests(numRequests) =>
+        requests = numRequests
+        cancellable = system.scheduler.schedule(0 seconds, 1000 milliseconds, self, SendMessage)
+
+      case SendMessage =>
+        count += 1
+        if (count <= requests) {
+          self ! RouteMsg("route" + count, new Node(getRandomKey().toInt, Actor.noSender), -1)
+        } else {
+          // the +10 causes a 10 second delay roughly.
+          if (count == requests + 10) {
+            cancellable.cancel
+            parent ! Watcher.Terminate(selfNode)
+          }
+        }
+
       case PrintTable =>
         print()
     }
@@ -680,10 +696,16 @@ object Project3Bonus {
         sender ! isAliveResponse(false)
 
       case RouteMsg(msg, key, hop) =>
-        sender ! UseAlternateRoute(msg, key, hop)
+        if (hop != -1) {
+          sender ! UseAlternateRoute(msg, key, hop)
+        }
 
       case RequestingTable(tabletype, row, col, currRow) =>
         sender ! isAliveResponse(false)
+
+      case SendMessage =>
+        cancellable.cancel
+        parent ! Watcher.Terminate(selfNode)
 
       case _ => println("FAILED AGAIN")
 
