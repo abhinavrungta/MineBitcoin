@@ -281,9 +281,8 @@ object Project3 {
       var r = leafArr.filter(a => a.nodeId > selfNode.nodeId)
 
       var count = 0
-      var tmpArr = arr.distinct
-      while (count < tmpArr.length) {
-        var item = tmpArr(count)
+      while (count < arr.length) {
+        var item = arr(count)
         // if item < selfNodeId, it possibly goes in left array.
         if (item.nodeId < selfNode.nodeId) {
           l = updateLeafWithItemIfValid(item, l, size)
@@ -300,10 +299,9 @@ object Project3 {
     // update Neighbor Set Table
     private def updateNeighborSet(arr: Array[Node]) {
       var count = 0
-      var tmpArr = arr.distinct
 
-      while (count < tmpArr.length) {
-        var item = tmpArr(count)
+      while (count < arr.length) {
+        var item = arr(count)
         // if it is the same as current node, ignore, else proceed
         if (item.nodeId != selfNode.nodeId) {
           neighborArr = updateNeighborWithItemIfValid(item, neighborArr, base)
@@ -315,9 +313,8 @@ object Project3 {
     // update routing table
     private def updateRoutingSet(arr: Array[Node]) {
       var ctr = 0
-      var tmpArr = arr.distinct
-      while (ctr < tmpArr.length) {
-        var item = tmpArr(ctr)
+      while (ctr < arr.length) {
+        var item = arr(ctr)
         var itemIdStr = getString(item.nodeId)
 
         // if it is not the current nodeId, proceed
