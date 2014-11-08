@@ -11,21 +11,22 @@ import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
 import akka.actor.Cancellable
 import com.typesafe.config.ConfigFactory
+import com.sun.jmx.snmp.Timestamp
 
-object Project4 {
+object Project4Client {
   def main(args: Array[String]) {
     // exit if arguments not passed as command line param.
-    if (args.length < 1) {
+    if (args.length < 2) {
       println("INVALID NO OF ARGS.  USAGE :")
       System.exit(1)
-    } else if (args.length == 1) {
-      var factor = args(0).toInt
+    } else if (args.length == 2) {
+      var avgTweetsPerUser = args(0).toInt
+      var noOfUsers = args(1).toInt
 
       // create actor system and a watcher actor
-      val system = ActorSystem("Twitter", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 } } } } } """)))
-      /* creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
-       * Once that is done, it starts sending messages. */
-      val watcher = system.actorOf(Props(new Watcher(factor)), name = "Watcher")
+      val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 } } } } } """)))
+      // creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
+      val watcher = system.actorOf(Props(new Watcher(noOfUsers, avgTweetsPerUser)), name = "Watcher")
     }
   }
 
@@ -33,18 +34,14 @@ object Project4 {
     case class Terminate(node: Client)
   }
 
-  class Watcher(factor: Int) extends Actor {
+  class Watcher(noOfUsers: Int, avgTweetsPerUser: Int) extends Actor {
     import Watcher._
     import context._
-    var cancellable: Cancellable = null
 
-    // keep track of actors and application obj.
+    // keep track of actors.
     var nodesArr = ArrayBuffer.empty[Client]
 
-    // create nodes (actors) and asks them to join to the n/w at intervals of 10 ms. It will then wait for all of them to join.
-    // add first actor immediately and the rest after a second.
-
-    for (i <- 1 to 2) {
+    for (i <- 1 to noOfUsers) {
       var node = actorOf(Props(new Client()), name = "Worker" + i)
       system.scheduler.scheduleOnce(1000 + 10 * i milliseconds, node, Client.Init)
     }
@@ -68,6 +65,11 @@ object Project4 {
     }
   }
 
+  class EventNode(time: Long, event: String) {
+    var timestamp = time
+    var eventDesc = event
+  }
+
   object Client {
     case object Init
     case object FAILED
@@ -78,13 +80,26 @@ object Project4 {
     import Client._
 
     /* Constructor Started */
+    var clientId = 0
+    var tweetRate = 0
+    var eventsArr = ArrayBuffer.empty[EventNode]
+    var duration = system.scheduler.schedule(0 seconds, 10 milliseconds, self, Init)
 
     /* Constructor Ended */
+
+    def insertEvent(time: Long, event: String) {
+      eventsArr += new EventNode(time, event)
+      eventsArr.sortBy(a => a.timestamp)
+    }
+
+    def runEvent() {
+      system.scheduler.scheduleOnce(2 milliseconds, self, Client.Init)
+    }
 
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
       case Init =>
-        println("******************************************************************")
+
       case _ => println("FAILED")
 
     }
