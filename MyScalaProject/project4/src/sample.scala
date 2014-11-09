@@ -2,6 +2,7 @@ package project4.src
 
 import scala.annotation.tailrec
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 trait Dist[A] {
   self =>
@@ -22,6 +23,7 @@ class ClientNode(node: Int) {
   var followingUsers = 0
   var avgTweets = 0
   var name = "Client # " + id
+  var arr = ArrayBuffer.empty[Int]
 }
 
 object sample {
@@ -49,14 +51,14 @@ object sample {
     }
 
     var clientList = ArrayBuffer.empty[ClientNode]
-    for (i <- 1 to noOfUsers - 1) {
-      clientList(i) = new ClientNode(i)
+    for (i <- 1 to noOfUsers) {
+      clientList += new ClientNode(i)
     }
 
     var ctr1 = 0
     // 307 => mean (avg tweets per user).	sample(size) => size is the no of Users.
     var TweetsPerUser = exponential(1.0 / 307.0).sample(noOfUsers).map(_.toInt)
-    for (i <- 1 to noOfUsers - 1) {
+    for (i <- 0 to noOfUsers - 1) {
       clientList(i).avgTweets = TweetsPerUser(i)
       ctr1 += TweetsPerUser(i)
     }
@@ -75,24 +77,39 @@ object sample {
     }
 
     var duration = ctr1 / avgTweetsPerSecond
+
+    var percent10 = (duration * 0.1).toInt
+    var indexes = ArrayBuffer.empty[Int]
+    val rnd = new Random
+
+    for (i <- 1 to percent10) {
+      var tmp = rnd.nextInt(duration)
+      while (indexes.contains(tmp)) {
+        tmp = rnd.nextInt(duration)
+      }
+      indexes += tmp
+    }
+
     println(duration)
 
     var ctr4 = 0
-    var ctr5 = 0
     for (i <- 0 to noOfUsers - 1) {
       // Std. Deviation = Mean/4 (25%),		Mean = TweetsPerUser(i)
-      var ctr3 = 0
       var mean = clientList(i).avgTweets / duration.toDouble
-      val tweetpersecondperuser = gaussian.map(_ * (mean / 4) + mean).sample(duration).map(a => Math.round(a).toInt)
-      tweetpersecondperuser.foreach(a => { ctr3 += a; if (a < 0) { ctr5 += 1 } })
-      println("*********************** " + ctr3 + " ****")
-      ctr4 += ctr3
+      var tweetpersecondperuser = gaussian.map(_ * (mean / 4) + mean).sample(duration).map(a => Math.round(a).toInt)
+
+      var skewedRate = tweetpersecondperuser.sortBy(a => a).takeRight(percent10).map(_ * 2) // double value of 10% of largest values to simulate peaks.
+      for (j <- 0 to percent10 - 1) {
+        tweetpersecondperuser(indexes(j)) = skewedRate(j)
+      }
+      clientList(i).arr = tweetpersecondperuser
+      println("*********************** " + tweetpersecondperuser.sum + " ****")
+      ctr4 += tweetpersecondperuser.sum
     }
 
     //duration will be the sample size for the twitter column distribution
     println("************* " + ctr1)
     println("************* " + ctr4)
-    println("************* " + ctr5)
 
   }
 }
