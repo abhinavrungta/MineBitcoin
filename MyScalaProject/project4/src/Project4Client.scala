@@ -64,7 +64,8 @@ object Project4Client {
 
     // create given number of clients and initialize.
     for (i <- 0 to noOfUsers - 1) {
-      var node = actorOf(Props(new Client(TweetsPerUser(i), duration, indexes)), name = "Worker" + i)
+      var node = actorOf(Props(new Client()), name = "Worker" + i)
+      node ! Client.Init(TweetsPerUser(i), duration, indexes)
       nodesArr += node
     }
 
@@ -90,40 +91,70 @@ object Project4Client {
     }
   }
 
-  object Client {
-    case object Init
-    case object FAILED
-    case class FollowingList(followingList: ArrayBuffer[ActorRef])
-    case class FollowersList(followingList: ArrayBuffer[ActorRef])
+  class Event(relative: Int = 0, abs: Long = 0, tweets: Int = 0) {
+    var relativeTime = relative
+    var absTime = abs
+    var noOfTweets = tweets
   }
 
-  class Client(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int]) extends Actor {
+  object Client {
+    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int])
+    case class FollowingList(followingList: ArrayBuffer[ActorRef])
+    case class FollowersList(followingList: ArrayBuffer[ActorRef])
+    case class Tweet(noOfTweets: Int)
+    case object FAILED
+  }
+
+  class Client() extends Actor {
     import context._
     import Client._
 
     /* Constructor Started */
     var followingList = ArrayBuffer.empty[ActorRef]
     var followersList = ArrayBuffer.empty[ActorRef]
-
-    val pdf = new PDF()
-
-    // Generate Timeline for tweets for given duration. Std. Deviation = Mean/4 (25%),	Mean = TweetsPerUser(i)
-    var mean = avgNoOfTweets / duration.toDouble
-    var tweetspersecond = pdf.gaussian.map(_ * (mean / 4) + mean).sample(duration).map(a => Math.round(a).toInt)
-    var skewedRate = tweetspersecond.sortBy(a => a).takeRight(indexes.length).map(_ * 2) // double value of 10% of largest values to simulate peaks.
-    for (j <- 0 to indexes.length - 1) {
-      tweetspersecond(indexes(j)) = skewedRate(j)
-    }
-
+    var events = ArrayBuffer.empty[Event]
     /* Constructor Ended */
 
+    def Initialize(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int]) {
+      val pdf = new PDF()
+
+      // Generate Timeline for tweets for given duration. Std. Deviation = Mean/4 (25%),	Mean = TweetsPerUser(i)
+      var mean = avgNoOfTweets / duration.toDouble
+      var tweetspersecond = pdf.gaussian.map(_ * (mean / 4) + mean).sample(duration).map(a => Math.round(a).toInt)
+      var skewedRate = tweetspersecond.sortBy(a => a).takeRight(indexes.length).map(_ * 2) // double value of 10% of largest values to simulate peaks.
+      for (j <- 0 to indexes.length - 1) {
+        tweetspersecond(indexes(j)) = skewedRate(j)
+      }
+
+      for (j <- 0 to duration - 1) {
+        events += new Event(j, 0, tweetspersecond(j))
+      }
+      events = events.filter(a => a.noOfTweets > 0).sortBy(a => a.relativeTime)
+    }
+
+    def setAbsoluteTime(baseTime: Long) {
+      var tmp = events.size
+      for (j <- 0 to tmp - 1) {
+        events(j).absTime = baseTime + (events(j).relativeTime * 1000)
+      }
+    }
+
     def runEvent() {
-      system.scheduler.scheduleOnce(2 milliseconds, self, Client.Init)
+      if (!events.isEmpty) {
+        var tmp = events.head
+        var relative = (tmp.absTime - System.currentTimeMillis()).toInt
+        if (relative < 0) {
+          relative = 0
+        }
+        events.trimStart(1)
+        system.scheduler.scheduleOnce(relative milliseconds, self, Tweet(tmp.noOfTweets))
+      }
     }
 
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
-      case Init =>
+      case Init(avgNoOfTweets, duration, indexes) =>
+        Initialize(avgNoOfTweets, duration, indexes)
 
       case FollowingList(arr) =>
         followingList = arr
