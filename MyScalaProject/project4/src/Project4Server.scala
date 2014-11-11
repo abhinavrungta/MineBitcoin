@@ -1,29 +1,36 @@
 package project4.src;
 
-import java.security.MessageDigest
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.DurationInt
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import akka.actor.Cancellable
 import com.typesafe.config.ConfigFactory
-import com.sun.jmx.snmp.Timestamp
-import scala.util.Random
+import akka.routing.SmallestMailboxRouter
 
 object Project4Server {
+  var nodesArr = ArrayBuffer.empty[ActorRef]
+  var followersList = Array.fill(1)(ArrayBuffer.empty[ActorRef])
+  var followingList = Array.fill(1)(ArrayBuffer.empty[ActorRef])
+
   def main(args: Array[String]) {
     // create actor system and a watcher actor
     val system = ActorSystem("TwitterServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 12000 } } } } } """)))
-    // creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
+
+    // create n actors in the server for handling requests.
+    val arr = ArrayBuffer.empty[ActorRef]
+    for (j <- 0 to 49) {
+      arr += system.actorOf(Props(new Server()), name = "Server" + j)
+    }
+    // create a router.
+    val router: ActorRef = system.actorOf(Props.empty.withRouter(SmallestMailboxRouter(routees = arr.toVector)), name = "router")
+    // creates a watcher Actor. In the constructor, it initializes nodesArr and creates followers and following list
     val watcher = system.actorOf(Props(new Watcher()), name = "Watcher")
   }
 
   object Watcher {
-    case class Terminate(node: ActorRef)
     case class Init(nodesArr: ArrayBuffer[ActorRef])
   }
 
@@ -31,11 +38,8 @@ object Project4Server {
     import Watcher._
     import context._
 
-    var followersList = Array.fill(1)(ArrayBuffer.empty[ActorRef])
-    var followingList = Array.fill(1)(ArrayBuffer.empty[ActorRef])
     val pdf = new PDF()
     // keep track of actors.
-    var nodesArr = ArrayBuffer.empty[ActorRef]
 
     def Initialize(arr: ArrayBuffer[ActorRef]) {
       nodesArr = arr
@@ -73,26 +77,29 @@ object Project4Server {
         nodesArr(j) ! Project4Client.Client.FollowingList(followingList(j))
         nodesArr(j) ! Project4Client.Client.FollowersList(followersList(j))
       }
-
     }
-
-    var startTime = System.currentTimeMillis()
     // end of constructor
 
     // Receive block for the Watcher.
     final def receive = LoggingReceive {
-      case Terminate(node) =>
-        nodesArr -= node
-        val finalTime = System.currentTimeMillis()
-        println("No of Alive Nodes " + nodesArr.length)
-        // when all actors are down, shutdown the system.
-        if (nodesArr.isEmpty) {
-          println("Final:" + (finalTime - startTime))
-          context.system.shutdown
-        }
-
       case Init(arr) =>
         Initialize(arr)
+
+      case _ => println("FAILED HERE")
+    }
+  }
+
+  object Server {
+    case object Init
+  }
+
+  class Server extends Actor {
+    import Server._
+    import context._
+
+    // Receive block for the Watcher.
+    final def receive = LoggingReceive {
+      case Init =>
 
       case _ => println("FAILED HERE")
     }

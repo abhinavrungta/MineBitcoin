@@ -1,17 +1,16 @@
 package project4.src;
 
-import java.security.MessageDigest
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
+import scala.util.Random
+import com.typesafe.config.ConfigFactory
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import akka.actor.Cancellable
-import com.typesafe.config.ConfigFactory
-import scala.util.Random
+import akka.actor.ActorSelection
 
 object Project4Client {
   def main(args: Array[String]) {
@@ -40,6 +39,7 @@ object Project4Client {
     import context._
 
     val pdf = new PDF()
+    val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/router")
     // keep track of actors.
     var nodesArr = ArrayBuffer.empty[ActorRef]
 
@@ -65,11 +65,11 @@ object Project4Client {
     // create given number of clients and initialize.
     for (i <- 0 to noOfUsers - 1) {
       var node = actorOf(Props(new Client()), name = "Worker" + i)
-      node ! Client.Init(TweetsPerUser(i), duration, indexes)
+      node ! Client.Init(TweetsPerUser(i), duration, indexes, router)
       nodesArr += node
     }
 
-    val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Master")
+    val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
     server ! Project4Server.Watcher.Init(nodesArr)
 
     var startTime = System.currentTimeMillis()
@@ -98,7 +98,7 @@ object Project4Client {
   }
 
   object Client {
-    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int])
+    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], router: ActorSelection)
     case class FollowingList(followingList: ArrayBuffer[ActorRef])
     case class FollowersList(followingList: ArrayBuffer[ActorRef])
     case class Tweet(noOfTweets: Int)
@@ -110,6 +110,7 @@ object Project4Client {
     import Client._
 
     /* Constructor Started */
+    var routerRef: ActorSelection = null
     var followingList = ArrayBuffer.empty[ActorRef]
     var followersList = ArrayBuffer.empty[ActorRef]
     var events = ArrayBuffer.empty[Event]
@@ -153,7 +154,8 @@ object Project4Client {
 
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
-      case Init(avgNoOfTweets, duration, indexes) =>
+      case Init(avgNoOfTweets, duration, indexes, router) =>
+        routerRef = router
         Initialize(avgNoOfTweets, duration, indexes)
 
       case FollowingList(arr) =>
