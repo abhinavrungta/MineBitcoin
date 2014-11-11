@@ -28,7 +28,7 @@ object Project4Client {
 
       // create actor system and a watcher actor
       val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 , "maximum-frame-size" : 1280000b } } } } } """)))
-      // creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
+      // creates a watcher Actor.
       val watcher = system.actorOf(Props(new Watcher(noOfUsers, avgTweetsPerSecond, ipAddress)), name = "Watcher")
     }
   }
@@ -42,7 +42,7 @@ object Project4Client {
     import context._
 
     val pdf = new PDF()
-    val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/router")
+    val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Router")
     // keep track of actors.
     var nodesArr = ArrayBuffer.empty[ActorRef]
 
@@ -64,16 +64,18 @@ object Project4Client {
       }
       indexes += tmp
     }
-
+    println(TweetsPerUser.sum)
+    // start running after 30 seconds from currentTime.
+    var absoluteStartTime = System.currentTimeMillis() + (10 * 1000)
     // create given number of clients and initialize.
     for (i <- 0 to noOfUsers - 1) {
-      var node = actorOf(Props(new Client()), name = "Worker" + i)
-      node ! Client.Init(TweetsPerUser(i), duration, indexes, router)
+      var node = actorOf(Props(new Client()), name = "" + i)
+      node ! Client.Init(TweetsPerUser(i), duration, indexes, absoluteStartTime, router)
       nodesArr += node
     }
 
     val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
-    server ! Project4Server.Watcher.Init(nodesArr.map(_.path.name))
+    server ! Project4Server.Watcher.Init(nodesArr)
 
     var startTime = System.currentTimeMillis()
     // end of constructor
@@ -101,7 +103,7 @@ object Project4Client {
   }
 
   object Client {
-    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], router: ActorSelection)
+    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long, router: ActorSelection)
     case class FollowingList(followingList: ArrayBuffer[ActorRef])
     case class FollowersList(followingList: ArrayBuffer[ActorRef])
     case class Tweet(noOfTweets: Int)
@@ -117,6 +119,8 @@ object Project4Client {
     var followingList = ArrayBuffer.empty[ActorRef]
     var followersList = ArrayBuffer.empty[ActorRef]
     var events = ArrayBuffer.empty[Event]
+    var id = self.path.name.toInt
+    val rand = new Random()
     /* Constructor Ended */
 
     def Initialize(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int]) {
@@ -155,17 +159,36 @@ object Project4Client {
       }
     }
 
+    def generateTweet(): String = {
+      var length = rand.nextInt(140)
+      var chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ0123456789"
+      var size = chars.size
+      var randomString = ""
+      for (j <- 1 to length) {
+        randomString += chars(rand.nextInt(size))
+      }
+      return randomString
+    }
+
     // Receive block when in Initializing State before Node is Alive.
     def Initializing: Receive = LoggingReceive {
-      case Init(avgNoOfTweets, duration, indexes, router) =>
+      case Init(avgNoOfTweets, duration, indexes, absoluteTime, router) =>
         routerRef = router
         Initialize(avgNoOfTweets, duration, indexes)
+        setAbsoluteTime(absoluteTime)
+        runEvent()
 
       case FollowingList(arr) =>
         followingList = arr
 
       case FollowersList(arr) =>
         followersList = arr
+
+      case Tweet(noOfTweets: Int) =>
+        for (j <- 1 to noOfTweets) {
+          routerRef ! Project4Server.Server.Tweet(id, System.currentTimeMillis(), generateTweet())
+        }
+        runEvent()
 
       case _ => println("FAILED")
 
