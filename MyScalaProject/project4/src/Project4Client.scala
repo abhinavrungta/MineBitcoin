@@ -1,16 +1,19 @@
-package project4.src;
+package project4.src
 
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
+
 import akka.actor.Actor
 import akka.actor.ActorRef
+import akka.actor.ActorSelection
+import akka.actor.ActorSelection.toScala
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import akka.actor.ActorSelection
 
 object Project4Client {
   def main(args: Array[String]) {
@@ -24,7 +27,7 @@ object Project4Client {
       var ipAddress = args(2)
 
       // create actor system and a watcher actor
-      val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 } } } } } """)))
+      val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 , "maximum-frame-size" : 1280000b } } } } } """)))
       // creates a watcher Actor. In the constructor, it starts joining nodes one by one to the n/w.
       val watcher = system.actorOf(Props(new Watcher(noOfUsers, avgTweetsPerSecond, ipAddress)), name = "Watcher")
     }
@@ -70,7 +73,7 @@ object Project4Client {
     }
 
     val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
-    server ! Project4Server.Watcher.Init(nodesArr)
+    server ! Project4Server.Watcher.Init(nodesArr.map(_.path.name))
 
     var startTime = System.currentTimeMillis()
     // end of constructor
