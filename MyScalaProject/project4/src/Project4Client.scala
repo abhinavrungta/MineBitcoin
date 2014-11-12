@@ -3,10 +3,9 @@ package project4.src
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
-
 import com.typesafe.config.ConfigFactory
-
 import akka.actor.Actor
+import akka.actor.Terminated
 import akka.actor.ActorRef
 import akka.actor.ActorSelection
 import akka.actor.ActorSelection.toScala
@@ -14,6 +13,7 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
+import akka.actor.PoisonPill
 
 object Project4Client {
   def main(args: Array[String]) {
@@ -34,7 +34,6 @@ object Project4Client {
   }
 
   object Watcher {
-    case class Terminate(node: ActorRef)
   }
 
   class Watcher(noOfUsers: Int, avgTweetsPerSecond: Int, ipAddress: String) extends Actor {
@@ -42,7 +41,7 @@ object Project4Client {
     import context._
 
     val pdf = new PDF()
-    val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Router")
+    val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher/Router")
     // keep track of actors.
     var nodesArr = ArrayBuffer.empty[ActorRef]
 
@@ -64,7 +63,6 @@ object Project4Client {
       }
       indexes += tmp
     }
-    println(TweetsPerUser.sum)
     // start running after 30 seconds from currentTime.
     var absoluteStartTime = System.currentTimeMillis() + (10 * 1000)
     // create given number of clients and initialize.
@@ -72,6 +70,7 @@ object Project4Client {
       var node = actorOf(Props(new Client()), name = "" + i)
       node ! Client.Init(TweetsPerUser(i), duration, indexes, absoluteStartTime, router)
       nodesArr += node
+      watch(node)
     }
 
     val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
@@ -82,13 +81,14 @@ object Project4Client {
 
     // Receive block for the Watcher.
     final def receive = LoggingReceive {
-      case Terminate(node) =>
+      case Terminated(node) =>
         nodesArr -= node
         val finalTime = System.currentTimeMillis()
         println("No of Alive Nodes " + nodesArr.length)
         // when all actors are down, shutdown the system.
         if (nodesArr.isEmpty) {
           println("Final:" + (finalTime - startTime))
+          router ! PoisonPill
           context.system.shutdown
         }
 
@@ -156,6 +156,8 @@ object Project4Client {
         }
         events.trimStart(1)
         system.scheduler.scheduleOnce(relative milliseconds, self, Tweet(tmp.noOfTweets))
+      } else {
+        context.stop(self)
       }
     }
 

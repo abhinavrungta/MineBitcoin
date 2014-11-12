@@ -1,38 +1,37 @@
 package project4.src
 
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.DurationInt
+
+import com.typesafe.config.ConfigFactory
+
 import akka.actor.Actor
 import akka.actor.ActorRef
+import akka.actor.Terminated
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import com.typesafe.config.ConfigFactory
 import akka.routing.SmallestMailboxRouter
-import akka.routing.RoundRobinRouter
 
 object Project4Server {
   var nodesArr = ArrayBuffer.empty[ActorRef]
   var followersList = Array.fill(1)(ArrayBuffer.empty[ActorRef])
   var followingList = Array.fill(1)(ArrayBuffer.empty[ActorRef])
+  var tweetTPS = ArrayBuffer.empty[Int]
+  var tmp = 0
 
   def main(args: Array[String]) {
     // create an actor system.
     val system = ActorSystem("TwitterServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 12000 , "maximum-frame-size" : 1280000b } } } } } """)))
 
-    // create n actors in the server for handling requests.
-    val arr = ArrayBuffer.empty[ActorRef]
-    for (j <- 0 to 49) {
-      arr += system.actorOf(Props(new Server()), name = "Server" + j)
-    }
-    // create a router with given actors.
-    val router = system.actorOf(Props.empty.withRouter(SmallestMailboxRouter(routees = arr.toVector)), name = "Router")
     // creates a watcher Actor. In the constructor, it initializes nodesArr and creates followers and following list
     val watcher = system.actorOf(Props(new Watcher()), name = "Watcher")
   }
 
   object Watcher {
     case class Init(nodesArr: ArrayBuffer[ActorRef])
+    case object Time
   }
 
   class Watcher extends Actor {
@@ -40,7 +39,9 @@ object Project4Server {
     import context._
 
     val pdf = new PDF()
-    // keep track of actors.
+    var cancellable = system.scheduler.schedule(0 seconds, 5000 milliseconds, self, Time)
+    val router = context.actorOf(Props[Server].withRouter(SmallestMailboxRouter(30)), name = "Router")
+    context.watch(router)
 
     def Initialize(arr: ArrayBuffer[ActorRef]) {
       nodesArr = arr
@@ -77,7 +78,6 @@ object Project4Server {
       }
 
       // send followers and following list to each user.
-      println("sending list.")
       for (j <- 0 to noOfUsers - 1) {
         nodesArr(j) ! Project4Client.Client.FollowingList(followingList(j))
         nodesArr(j) ! Project4Client.Client.FollowersList(followersList(j))
@@ -88,6 +88,16 @@ object Project4Server {
     final def receive = LoggingReceive {
       case Init(arr) =>
         Initialize(arr)
+
+      case Time =>
+        tweetTPS += tmp
+        tmp = 0
+
+      case Terminated(ref) =>
+        if (ref == router) {
+          println(tweetTPS)
+          system.shutdown
+        }
 
       case _ => println("FAILED HERE")
     }
@@ -101,12 +111,10 @@ object Project4Server {
     import Server._
     import context._
 
-    var serverId = self.path.name
-
     // Receive block for the Watcher.
     final def receive = LoggingReceive {
       case Tweet(userId, time, msg) =>
-        println("Recd " + msg + " in " + serverId)
+        tmp += 1
 
       case _ => println("FAILED HERE")
     }
