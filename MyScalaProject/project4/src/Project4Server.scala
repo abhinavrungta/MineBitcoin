@@ -3,8 +3,8 @@ package project4.src
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.HashMap
 import scala.collection.mutable.MutableList
+import scala.collection.concurrent.TrieMap
 
 import scala.concurrent.duration.DurationInt
 
@@ -31,8 +31,8 @@ object Project4Server {
   var tweetTPS = ArrayBuffer.empty[Int]
   var ctr: AtomicInteger = new AtomicInteger()
   var rdctr: AtomicInteger = new AtomicInteger()
-  var tweetStore = new HashMap[Int, Tweets]
-  var timeLines = new HashMap[Int, MutableList[Int]]
+  var tweetStore = new TrieMap[Int, Tweets]
+  var timeLines = new TrieMap[Int, ArrayBuffer[Int]]
 
   def main(args: Array[String]) {
     // create an actor system.
@@ -56,7 +56,7 @@ object Project4Server {
     var cancellable = system.scheduler.schedule(0 seconds, 5000 milliseconds, self, Time)
 
     // Start a router with 30 Actors in the Server.
-    val router = context.actorOf(Props[Server].withRouter(SmallestMailboxRouter(30)), name = "Router")
+    val router = context.actorOf(Props[Server].withRouter(SmallestMailboxRouter(10)), name = "Router")
     // Watch the router. It calls the terminate sequence when router is terminated.
     context.watch(router)
 
@@ -101,7 +101,7 @@ object Project4Server {
 
       // initialize timelines data.
       for (j <- 0 to noOfUsers - 1) {
-        timeLines.put(j, MutableList())
+        timeLines += (j -> ArrayBuffer())
       }
 
       println("Server started")
@@ -116,7 +116,6 @@ object Project4Server {
         var tmp = ctr.get() - tweetTPS.sum
         tweetTPS += (tmp)
         println(tmp)
-      //ctr.set(0)
 
       case Terminated(ref) =>
         if (ref == router) {
@@ -146,19 +145,27 @@ object Project4Server {
     final def receive = LoggingReceive {
       case Tweet(userId, time, msg) =>
         var tweetId = ctr.addAndGet(1) // generate tweetId.
-        tweetStore.put(tweetId, new Tweets(userId, msg, time)) // create object for the tweet store and add.
+        tweetStore += (tweetId -> new Tweets(userId, msg, time)) // create object for the tweet store and add.
 
         var followers = followersList(userId) // get all followers and add tweet to their timeline
-        followers.foreach(a => {
-          timeLines(a.path.name.toInt) += tweetId
-        })
+        for (j <- 0 to followers.size - 1) {
+          var index = followers(j).path.name.toInt
+          timeLines(index) += tweetId
+        }
+        timeLines(userId) += tweetId // add to self timeline also
 
       case SendTimeline(userId) =>
         rdctr.addAndGet(1)
         var tweetIds = timeLines(userId)
-        var tmp = new HashMap[Int, Tweets]
-        tweetIds.foreach(a => tmp.put(a, tweetStore(a)))
-        sender ! Project4Client.Client.RecvTimeline(tmp)
+        var tmp: Map[Int, String] = Map()
+        if (!tweetIds.isEmpty) {
+          //tweetIds.foreach(a => { tmp.put(a, tweetStore(a).msg) })
+          //tweetIds.foreach(a => { tmp += (a -> "OK") })
+          for (j <- 0 to tweetIds.size - 1) {
+            tmp += (tweetIds(j) -> "OK")
+          }
+          sender ! Project4Client.Client.RecvTimeline(tmp)
+        }
 
       case _ => println("FAILED HERE")
     }

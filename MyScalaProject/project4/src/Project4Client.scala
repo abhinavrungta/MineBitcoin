@@ -1,7 +1,6 @@
 package project4.src
 
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.HashMap
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
 import com.typesafe.config.ConfigFactory
@@ -117,7 +116,7 @@ object Project4Client {
     case class FollowingList(followingList: ArrayBuffer[ActorRef])
     case class FollowersList(followingList: ArrayBuffer[ActorRef])
     case class Tweet(noOfTweets: Int)
-    case class RecvTimeline(tweets: HashMap[Int, Project4Server.Tweets])
+    case class RecvTimeline(tweets: Map[Int, String])
     case object Stop
   }
 
@@ -133,6 +132,7 @@ object Project4Client {
     var id = self.path.name.toInt
     val rand = new Random()
     var cancellable: Cancellable = null
+    var ctr = 0
     /* Constructor Ended */
 
     def Initialize(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int]) {
@@ -191,7 +191,7 @@ object Project4Client {
         Initialize(avgNoOfTweets, duration, indexes)
         setAbsoluteTime(absoluteTime)
         var relative = (absoluteTime - System.currentTimeMillis()).toInt
-        cancellable = system.scheduler.schedule(relative milliseconds, 1 second, routerRef, Project4Server.Server.SendTimeline(id))
+        cancellable = system.scheduler.schedule(relative milliseconds, 3 second, routerRef, Project4Server.Server.SendTimeline(id))
         runEvent()
 
       case FollowingList(arr) =>
@@ -207,7 +207,7 @@ object Project4Client {
         runEvent()
 
       case RecvTimeline(map) =>
-      //println(map.size)
+        ctr += map.size
 
       case Stop =>
         cancellable.cancel
