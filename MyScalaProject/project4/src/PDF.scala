@@ -29,22 +29,6 @@ class PDF {
     override def get = rand.nextGaussian()
   }
 
-  // define a true/false method to modify uniform random distribution.
-  def tf(p: Double): Distribution[Boolean] = {
-    uniform.map(_ < p)
-  }
-
-  // define a bernoulli method to output 0/1 on top of tf method to modify uniform random distribution.
-  def bernoulli(p: Double): Distribution[Int] = {
-    tf(p).map(b => if (b) 1 else 0)
-  }
-
-  // randomly pick a value and map it to a given set of values.
-  def discreteUniform[A](values: Iterable[A]): Distribution[A] = {
-    val vec = values.toVector
-    uniform.map(x => vec((x * vec.length).toInt))
-  }
-
   def exponential(l: Double): Distribution[Double] = {
     for {
       x <- uniform
