@@ -3,9 +3,7 @@ package project4.src
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.mutable.MutableList
-import scala.collection.concurrent.TrieMap
-
+import scala.collection.mutable.HashMap
 import scala.concurrent.duration.DurationInt
 
 import com.typesafe.config.ConfigFactory
@@ -31,8 +29,8 @@ object Project4Server {
   var tweetTPS = ArrayBuffer.empty[Int]
   var ctr: AtomicInteger = new AtomicInteger()
   var rdctr: AtomicInteger = new AtomicInteger()
-  var tweetStore = new TrieMap[Int, Tweets]
-  var timeLines = new TrieMap[Int, ArrayBuffer[Int]]
+  var tweetStore = new HashMap[Int, Tweets]
+  var timeLines = new HashMap[Int, ArrayBuffer[Int]]
 
   def main(args: Array[String]) {
     // create an actor system.

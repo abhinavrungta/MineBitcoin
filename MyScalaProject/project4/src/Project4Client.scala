@@ -3,16 +3,19 @@ package project4.src
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
+
 import com.typesafe.config.ConfigFactory
+
 import akka.actor.Actor
 import akka.actor.ActorRef
-import akka.actor.ActorSelection
+import akka.actor.ActorSelection.toScala
 import akka.actor.ActorSystem
+import akka.actor.Cancellable
+import akka.actor.PoisonPill
 import akka.actor.Props
+import akka.actor.Terminated
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import akka.actor.PoisonPill
-import akka.actor.Cancellable
 
 object Project4Client {
   def main(args: Array[String]) {
@@ -39,7 +42,6 @@ object Project4Client {
     import context._
     import Watcher._
 
-    var ctr = 0
     val pdf = new PDF()
     // select router.
     //val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher/Router")
@@ -87,16 +89,12 @@ object Project4Client {
 
     // Receive block for the Watcher.
     final def receive = LoggingReceive {
-      case Terminate(node) =>
-        ctr += 1
+      case Terminated(node) =>
+        nodesArr -= node
         val finalTime = System.currentTimeMillis()
-        //println("No of Dead Nodes " + ctr)
         // when all actors are down, shutdown the system.
-        if (nodesArr.length == ctr) {
+        if (nodesArr.isEmpty) {
           println("Final:" + (finalTime - startTime))
-          for (i <- 0 to noOfUsers - 1) {
-            nodesArr(i) ! Client.Stop
-          }
           router ! PoisonPill
           context.system.shutdown
         }
@@ -133,6 +131,7 @@ object Project4Client {
     val rand = new Random()
     var cancellable: Cancellable = null
     var ctr = 0
+    var endTime: Long = 0
     /* Constructor Ended */
 
     def Initialize(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int]) {
@@ -150,6 +149,7 @@ object Project4Client {
       }
       events = events.filter(a => a.noOfTweets > 0).sortBy(a => a.relativeTime)
 
+      endTime = System.currentTimeMillis() + (duration * 1000)
     }
 
     def setAbsoluteTime(baseTime: Long) {
@@ -169,7 +169,11 @@ object Project4Client {
         events.trimStart(1)
         system.scheduler.scheduleOnce(relative milliseconds, self, Tweet(tmp.noOfTweets))
       } else {
-        parent ! Watcher.Terminate(self)
+        var relative = (endTime - System.currentTimeMillis()).toInt
+        if (relative < 0) {
+          relative = 0
+        }
+        system.scheduler.scheduleOnce(relative milliseconds, self, Stop)
       }
     }
 
