@@ -1,15 +1,12 @@
 package project4.src
 
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.collection.JavaConversions.asScalaBuffer
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.parallel.mutable.ParArray
 import scala.concurrent.duration.DurationInt
-
 import com.typesafe.config.ConfigFactory
-
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
@@ -20,10 +17,11 @@ import akka.event.LoggingReceive
 import akka.routing.SmallestMailboxRouter
 
 object Project4Server {
-  class Tweets(id: Int, tweet: String, time: Long) {
+  class Tweets(tid: Int, id: Int, tweet: String, time: Long) {
     var AuthorId = id
     var msg = tweet
     var timeStamp: Long = time
+    var tweetId = tid
     //var mentions: MutableList[Int] = MutableList()
   }
   var followersList = Array.fill(1)(ParArray.empty[Int])
@@ -32,8 +30,9 @@ object Project4Server {
   var ctr: AtomicInteger = new AtomicInteger()
   var rdctr: AtomicInteger = new AtomicInteger()
 
-  var tweetStore = new TrieMap[Int, Tweets]
-  var timeLines = Array.fill(1)(java.util.Collections.synchronizedList(new java.util.ArrayList[Int]()))
+  //var tweetStore = java.util.Collections.synchronizedList(new java.util.ArrayList[Tweets])
+  //var timeLines = Array.fill(1)(java.util.Collections.synchronizedList(new java.util.ArrayList[Tweets]))
+  var timeLines = Array.fill(1)(new java.util.concurrent.ConcurrentLinkedQueue[Tweets])
 
   def main(args: Array[String]) {
     // create an actor system.
@@ -57,7 +56,8 @@ object Project4Server {
     var cancellable = system.scheduler.schedule(0 seconds, 5000 milliseconds, self, Time)
 
     // Start a router with 30 Actors in the Server.
-    val router = context.actorOf(Props[Server].withRouter(SmallestMailboxRouter(6)), name = "Router")
+    var cores = (Runtime.getRuntime().availableProcessors() * 1.5).toInt
+    val router = context.actorOf(Props[Server].withRouter(SmallestMailboxRouter(cores)), name = "Router")
     // Watch the router. It calls the terminate sequence when router is terminated.
     context.watch(router)
 
@@ -104,7 +104,7 @@ object Project4Server {
       }
 
       // initialize timelines data.
-      timeLines = Array.fill(noOfUsers)(java.util.Collections.synchronizedList(new java.util.ArrayList[Int]()))
+      timeLines = Array.fill(noOfUsers)(new java.util.concurrent.ConcurrentLinkedQueue[Tweets]())
       println("Server started")
     }
 
@@ -112,6 +112,7 @@ object Project4Server {
     final def receive = LoggingReceive {
       case Init(arr) =>
         Initialize(arr)
+        System.gc()
 
       case Time =>
         var tmp = ctr.get() - tweetTPS.sum
@@ -122,7 +123,7 @@ object Project4Server {
         if (ref == router) {
           println(tweetTPS)
           println(rdctr.get())
-          println(tweetStore.size)
+          //println(tweetStore.size)
           for (j <- 0 to followersList.size - 1) {
             //            println(timeLines(j).size)
           }
@@ -146,11 +147,12 @@ object Project4Server {
     final def receive = LoggingReceive {
       case Tweet(userId, time, msg) =>
         var tweetId = ctr.addAndGet(1) // generate tweetId.
-        tweetStore += (tweetId -> new Tweets(userId, msg, time)) // create object for the tweet store and add.
+        var tmp = new Tweets(tweetId, userId, msg, time)
+        //tweetStore += (tmp) // create object for the tweet store and add.
 
         var followers = followersList(userId) // get all followers and add tweet to their timeline
-        followers.foreach(a => { timeLines(a) += tweetId })
-        timeLines(userId) += tweetId // add to self timeline also
+        followers.foreach(a => { timeLines(a).add(tmp); if (timeLines(a).size() > 100) { timeLines(a).remove() } })
+        timeLines(userId).add(tmp) // add to self timeline also
 
       case SendTimeline(userId) =>
         rdctr.addAndGet(1)
@@ -159,8 +161,12 @@ object Project4Server {
         if (!tweetIds.isEmpty) {
           //tweetIds.foreach(a => { tmp.put(a, tweetStore(a).msg) })
           //tweetIds.foreach(a => { tmp += (a -> "OK") })
-          for (j <- 0 to tweetIds.size - 1) {
-            tmp += (tweetIds(j) -> "OK")
+          //          for (j <- 0 to tweetIds.size - 1) {
+          //            tmp += (tweetIds(j).tweetId -> "OK")
+          //          }
+          var itr = tweetIds.iterator()
+          while (itr.hasNext()) {
+            tmp += (itr.next().tweetId -> "OK")
           }
           sender ! Project4Client.Client.RecvTimeline(tmp)
         }
