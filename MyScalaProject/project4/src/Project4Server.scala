@@ -159,11 +159,6 @@ object Project4Server {
         var tweetIds = timeLines(userId)
         var tmp: Map[Int, String] = Map()
         if (!tweetIds.isEmpty) {
-          //tweetIds.foreach(a => { tmp.put(a, tweetStore(a).msg) })
-          //tweetIds.foreach(a => { tmp += (a -> "OK") })
-          //          for (j <- 0 to tweetIds.size - 1) {
-          //            tmp += (tweetIds(j).tweetId -> "OK")
-          //          }
           var itr = tweetIds.iterator()
           while (itr.hasNext()) {
             tmp += (itr.next().tweetId -> "OK")
