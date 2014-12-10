@@ -10,9 +10,16 @@ import akka.actor.Cancellable
 import akka.actor.PoisonPill
 import akka.actor.Props
 import akka.actor.Terminated
-import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
 import akka.actor.ActorSelection
+import scala.concurrent.Future
+import spray.json.{ JsonFormat, DefaultJsonProtocol }
+import spray.http._
+import spray.client.pipelining._
+import akka.actor.ActorContext
+import scala.util.Failure
+import scala.util.Success
+import spray.httpx.SprayJsonSupport._
 
 object Project4Client {
   def main(args: Array[String]) {
@@ -40,9 +47,6 @@ object Project4Client {
     import Watcher._
 
     val pdf = new PDF()
-    // select router.
-    //val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher/Router")
-    val router = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher/Router")
 
     // 307 => mean (avg tweets per user).	sample(size) => size is the no of Users.
     var TweetsPerUser = pdf.exponential(1.0 / 307.0).sample(noOfUsers).map(_.toInt)
@@ -72,14 +76,14 @@ object Project4Client {
     for (i <- 0 to noOfUsers - 1) {
       var node = actorOf(Props(new Client()), name = "" + i)
       // Initialize Clients with info like #Tweets, duration of tweets, start Time, router address. 
-      node ! Client.Init(TweetsPerUser(i), duration, indexes, absoluteStartTime, router)
+      node ! Client.Init(TweetsPerUser(i), duration, indexes, absoluteStartTime)
       nodesArr += node
       context.watch(node)
     }
 
     // Initiate Server with list of Users.
     val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
-    server ! Project4Server.Watcher.Init(nodesArr)
+    server ! Project4Server.Watcher.Init(noOfUsers)
 
     var startTime = System.currentTimeMillis()
     // end of constructor
@@ -92,7 +96,6 @@ object Project4Client {
         // when all actors are down, shutdown the system.
         if (nodesArr.isEmpty) {
           println("Final:" + (finalTime - startTime))
-          router ! PoisonPill
           context.system.shutdown
         }
 
@@ -107,22 +110,26 @@ object Project4Client {
   }
 
   object Client {
-    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long, router: ActorSelection)
-    case class FollowingList(followingList: ArrayBuffer[ActorRef])
-    case class FollowersList(followingList: ArrayBuffer[ActorRef])
+    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long)
     case class Tweet(noOfTweets: Int)
-    case class RecvTimeline(tweets: Map[Int, String])
+    case object GetTimeline
     case object Stop
   }
 
-  class Client() extends Actor {
+  case class RecvTimeline(tweets: Map[Int, String])
+  case class SendTweet(userId: Int, time: Long, msg: String)
+
+  object myJson extends DefaultJsonProtocol {
+    implicit val tweetFormat = jsonFormat3(SendTweet)
+    implicit val timelineFormat = jsonFormat1(RecvTimeline)
+  }
+
+  class Client(implicit system: ActorSystem) extends Actor {
     import context._
     import Client._
+    import myJson._
 
     /* Constructor Started */
-    var routerRef: ActorSelection = null
-    var followingList = ArrayBuffer.empty[ActorRef]
-    var followersList = ArrayBuffer.empty[ActorRef]
     var events = ArrayBuffer.empty[Event]
     var id = self.path.name.toInt
     val rand = new Random()
@@ -187,31 +194,36 @@ object Project4Client {
 
     // Receive block when in Initializing State before Node is Alive.
     final def receive = LoggingReceive {
-      case Init(avgNoOfTweets, duration, indexes, absoluteTime, router) =>
-        routerRef = router
+      case Init(avgNoOfTweets, duration, indexes, absoluteTime) =>
         Initialize(avgNoOfTweets, duration, indexes)
         setAbsoluteTime(absoluteTime)
         var relative = (absoluteTime - System.currentTimeMillis()).toInt
-        //cancellable = system.scheduler.schedule(relative milliseconds, 3 second, routerRef, Project4Server.Server.SendTimeline(id))
+        cancellable = system.scheduler.schedule(relative milliseconds, 3 second, self, GetTimeline)
         runEvent()
-
-      case FollowingList(arr) =>
-        followingList = arr
-
-      case FollowersList(arr) =>
-        followersList = arr
 
       case Tweet(noOfTweets: Int) =>
         for (j <- 1 to noOfTweets) {
-          routerRef ! Project4Server.Server.Tweet(id, System.currentTimeMillis(), generateTweet())
+          val pipeline: HttpRequest => Future[String] = sendReceive ~> unmarshal[String]
+          val responseFuture: Future[String] = pipeline(Post("http://spray.io/tweet", SendTweet(id, System.currentTimeMillis(), generateTweet())))
+          responseFuture onComplete {
+            case Success(str) =>
+
+            case Failure(error) =>
+          }
         }
         runEvent()
 
-      case RecvTimeline(map) =>
-        ctr += map.size
+      case GetTimeline =>
+        val pipeline: HttpRequest => Future[RecvTimeline] = sendReceive ~> unmarshal[RecvTimeline]
+        val responseFuture: Future[RecvTimeline] = pipeline(Get("http://spray.io/timeline/" + id))
+        responseFuture onComplete {
+          case Success(RecvTimeline(tweets: Map[Int, String])) =>
+
+          case Failure(error) =>
+        }
 
       case Stop =>
-        //cancellable.cancel
+        cancellable.cancel
         context.stop(self)
 
       case _ => println("FAILED")
