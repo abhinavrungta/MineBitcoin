@@ -7,7 +7,6 @@ import scala.concurrent.duration.DurationInt
 import com.typesafe.config.ConfigFactory
 
 import akka.actor.Actor
-import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.actor.Terminated
@@ -16,12 +15,11 @@ import akka.event.LoggingReceive
 import akka.routing.SmallestMailboxPool
 
 object Project4Server {
-  class Tweets(tid: Int, id: Int, tweet: String, time: Long) {
+  class Tweets(tid: String, id: Int, tweet: String, time: Long) {
     var AuthorId = id
     var msg = tweet
     var timeStamp: Long = time
     var tweetId = tid
-    //var mentions: MutableList[Int] = MutableList()
   }
   var followersList = Array.fill(1)(ParArray.empty[Int])
   var followingList = Array.fill(1)(ParArray.empty[Int])
@@ -123,7 +121,7 @@ object Project4Server {
   }
 
   object Server {
-    case class Tweet(userId: Int, time: Long, msg: String)
+    case class AddTweet(userId: Int, time: Long, msg: String)
     case class SendTimeline(userId: Int)
   }
 
@@ -133,10 +131,9 @@ object Project4Server {
 
     // Receive block for the Server.
     final def receive = LoggingReceive {
-      case Tweet(userId, time, msg) =>
+      case AddTweet(userId, time, msg) =>
         var tweetId = ctr.addAndGet(1) // generate tweetId.
-        var tmp = new Tweets(tweetId, userId, msg, time)
-        //tweetStore += (tmp) // create object for the tweet store and add.
+        var tmp = new Tweets(tweetId.toString, userId, msg, time)
 
         var followers = followersList(userId) // get all followers and add tweet to their timeline
         followers.foreach(a => { timeLines(a).add(tmp); if (timeLines(a).size() > 100) { timeLines(a).remove() } })
@@ -145,16 +142,17 @@ object Project4Server {
       case SendTimeline(userId) =>
         rdctr.addAndGet(1)
         var tweetIds = timeLines(userId)
-        var tmp: Map[Int, String] = Map()
+        var tmp: Map[String, String] = Map()
         if (!tweetIds.isEmpty) {
           var itr = tweetIds.iterator()
           while (itr.hasNext()) {
             tmp += (itr.next().tweetId -> "OK")
           }
-          sender ! tmp
         }
+        tmp += ("0" -> "OOO")
+        sender ! tmp
 
-      case _ => println("FAILED HERE")
+      case _ => println("FAILED HERE 2")
     }
   }
 }

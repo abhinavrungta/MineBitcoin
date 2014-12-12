@@ -1,27 +1,37 @@
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
+import scala.util.Failure
 import scala.util.Random
+import scala.util.Success
+
 import com.typesafe.config.ConfigFactory
+
 import akka.actor.Actor
 import akka.actor.ActorRef
 import akka.actor.ActorSelection.toScala
 import akka.actor.ActorSystem
 import akka.actor.Cancellable
-import akka.actor.PoisonPill
 import akka.actor.Props
 import akka.actor.Terminated
+import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
-import akka.actor.ActorSelection
-import scala.concurrent.Future
-import spray.json.{ JsonFormat, DefaultJsonProtocol }
-import spray.http._
-import spray.client.pipelining._
-import akka.actor.ActorContext
-import scala.util.Failure
-import scala.util.Success
-import spray.httpx.SprayJsonSupport._
+import spray.client.pipelining.WithTransformerConcatenation
+import spray.client.pipelining.sendReceive
+import spray.client.pipelining.sendReceive$default$3
+import spray.client.pipelining.unmarshal
+import spray.http.ContentTypes
+import spray.http.HttpEntity
+import spray.http.HttpMethods.GET
+import spray.http.HttpMethods.POST
+import spray.http.HttpRequest
+import spray.http.Uri.apply
+import spray.httpx.SprayJsonSupport.sprayJsonUnmarshaller
+import spray.json.DefaultJsonProtocol
+import spray.json.pimpAny
 
 object Project4Client {
+  var ipAddress: String = ""
   def main(args: Array[String]) {
     // exit if arguments not passed as command line param.
     if (args.length < 3) {
@@ -30,7 +40,7 @@ object Project4Client {
     } else if (args.length == 3) {
       var avgTweetsPerSecond = args(0).toInt
       var noOfUsers = args(1).toInt
-      var ipAddress = args(2)
+      ipAddress = args(2)
 
       // create actor system and a watcher actor.
       val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 , "maximum-frame-size" : 1280000b } } } } } """)))
@@ -81,7 +91,7 @@ object Project4Client {
       context.watch(node)
     }
 
-    // Initiate Server with list of Users.
+    // Initiate Server with no of Users.
     val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
     server ! Project4Server.Watcher.Init(noOfUsers)
 
@@ -116,7 +126,7 @@ object Project4Client {
     case object Stop
   }
 
-  case class RecvTimeline(tweets: Map[Int, String])
+  case class RecvTimeline(tweets: Map[String, String])
   case class SendTweet(userId: Int, time: Long, msg: String)
 
   object myJson extends DefaultJsonProtocol {
@@ -204,10 +214,11 @@ object Project4Client {
       case Tweet(noOfTweets: Int) =>
         for (j <- 1 to noOfTweets) {
           val pipeline: HttpRequest => Future[String] = sendReceive ~> unmarshal[String]
-          val responseFuture: Future[String] = pipeline(Post("http://spray.io/tweet", SendTweet(id, System.currentTimeMillis(), generateTweet())))
+          val request = HttpRequest(method = POST, uri = "http://" + ipAddress + ":8080/tweet", entity = HttpEntity(ContentTypes.`application/json`, SendTweet(id, System.currentTimeMillis(), generateTweet()).toJson.toString))
+          val responseFuture: Future[String] = pipeline(request)
           responseFuture onComplete {
             case Success(str) =>
-
+              println(str)
             case Failure(error) =>
           }
         }
@@ -215,10 +226,10 @@ object Project4Client {
 
       case GetTimeline =>
         val pipeline: HttpRequest => Future[RecvTimeline] = sendReceive ~> unmarshal[RecvTimeline]
-        val responseFuture: Future[RecvTimeline] = pipeline(Get("http://spray.io/timeline/" + id))
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/timeline/" + id)
+        val responseFuture: Future[RecvTimeline] = pipeline(request)
         responseFuture onComplete {
-          case Success(RecvTimeline(tweets: Map[Int, String])) =>
-
+          case Success(RecvTimeline(tweets: Map[String, String])) =>
           case Failure(error) =>
         }
 
