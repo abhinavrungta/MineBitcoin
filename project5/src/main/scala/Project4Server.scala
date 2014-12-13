@@ -204,7 +204,9 @@ object Project4Server {
 
       case SendUserProfile(userId) =>
         var obj = users.get(userId)
-        sender ! sample(obj.userId, obj.userName, obj.userTimeline.size(), obj.favorites.size(), obj.followers.size(), obj.following.size())
+        var tmp: ArrayBuffer[sample] = ArrayBuffer.empty
+        tmp += sample(obj.userId, obj.userName, obj.userTimeline.size(), obj.favorites.size(), obj.followers.size(), obj.following.size())
+        sender ! tmp.toList
 
       case SendMentions(userId) =>
         var mentionName = "@" + users.get(userId).userName

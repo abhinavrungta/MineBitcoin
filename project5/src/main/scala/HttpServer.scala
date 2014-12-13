@@ -102,9 +102,9 @@ object HttpServer extends JsonFormats {
       case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/user" =>
         var id = path.split("/").last.toInt
         var client = sender
-        val result = (server ? Project4Server.Server.SendUserProfile(id)).mapTo[UserProfile]
+        val result = (server ? Project4Server.Server.SendUserProfile(id)).mapTo[List[UserProfile]]
         result onSuccess {
-          case result: UserProfile =>
+          case result: List[UserProfile] =>
             val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
             client ! HttpResponse(entity = body)
         }
