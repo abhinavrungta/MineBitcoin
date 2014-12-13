@@ -17,6 +17,7 @@ import akka.event.LoggingReceive
 import akka.routing.SmallestMailboxPool
 
 object Project4Server {
+  case class sample(id: Int, name: String, statusCount: Int, favoritesCount: Int, followersCount: Int, followingCount: Int) extends java.io.Serializable
 
   class User(id: Int) {
     var userId = id
@@ -122,7 +123,12 @@ object Project4Server {
 
   object Server {
     case class AddTweet(userId: Int, time: Long, msg: String)
-    case class SendTimeline(userId: Int)
+    case class SendHomeTimeline(userId: Int)
+    case class SendUserTimeline(userId: Int)
+    case class SendFollowers(userId: Int)
+    case class SendFollowing(userId: Int)
+    case class SendMentions(userId: Int)
+    case class SendUserProfile(userId: Int)
   }
 
   class Server extends Actor {
@@ -132,8 +138,23 @@ object Project4Server {
     // Receive block for the Server.
     final def receive = LoggingReceive {
       case AddTweet(userId, time, msg) =>
+        var regexMentions = "@[a-zA-Z0-9]+\\s*".r
+        var regexTags = "#[a-zA-Z0-9]+\\s*".r
         var tweetId = ctr.addAndGet(1).toString // generate tweetId.
         var tmp = new Tweets(tweetId, userId, msg, time)
+
+        // extract mentions and store in tweet object
+        var itr = regexMentions.findAllMatchIn(msg)
+        while (itr.hasNext) {
+          tmp.mentions += itr.next().toString.trim
+        }
+
+        // extract tags and store in tweet object
+        itr = regexTags.findAllMatchIn(msg)
+        while (itr.hasNext) {
+          tmp.hashtags += itr.next().toString.trim
+        }
+
         tweetStore.put(tweetId, tmp)
 
         var followers = users.get(userId).followers.iterator() // get all followers and add tweet to their timeline
@@ -141,15 +162,61 @@ object Project4Server {
           users.get(followers.next()).homeTimeline.add(tweetId)
         }
         users.get(userId).userTimeline.add(tweetId) // add to self timeline also
-        sender ! "OK"
+        sender ! tweetId
 
-      case SendTimeline(userId) =>
+      case SendHomeTimeline(userId) =>
         var tweetIds = users.get(userId).homeTimeline
         var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
         var itr = tweetIds.iterator()
         while (itr.hasNext()) {
           tmp += tweetStore.get(itr.next())
         }
+        sender ! tmp.toList
+
+      case SendUserTimeline(userId) =>
+        var tweetIds = users.get(userId).userTimeline
+        var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
+        var itr = tweetIds.iterator()
+        while (itr.hasNext()) {
+          tmp += tweetStore.get(itr.next())
+        }
+        sender ! tmp.toList
+
+      case SendFollowers(userId) =>
+        var idList = users.get(userId).followers
+        var tmp: ArrayBuffer[sample] = ArrayBuffer.empty
+        var itr = idList.iterator()
+        while (itr.hasNext()) {
+          var obj = users.get(itr.next())
+          tmp += sample(obj.userId, obj.userName, obj.userTimeline.size(), obj.favorites.size(), obj.followers.size(), obj.following.size())
+        }
+        sender ! tmp.toList
+
+      case SendFollowing(userId) =>
+        var idList = users.get(userId).following
+        var tmp: ArrayBuffer[sample] = ArrayBuffer.empty
+        var itr = idList.iterator()
+        while (itr.hasNext()) {
+          var obj = users.get(itr.next())
+          tmp += sample(obj.userId, obj.userName, obj.userTimeline.size(), obj.favorites.size(), obj.followers.size(), obj.following.size())
+        }
+        sender ! tmp.toList
+
+      case SendUserProfile(userId) =>
+        var obj = users.get(userId)
+        sender ! sample(obj.userId, obj.userName, obj.userTimeline.size(), obj.favorites.size(), obj.followers.size(), obj.following.size())
+
+      case SendMentions(userId) =>
+        var mentionName = "@" + users.get(userId).userName
+        var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
+        val itr = tweetStore.entrySet().iterator()
+        while (itr.hasNext()) {
+          val entry = itr.next();
+          if (entry.getValue.mentions.contains(mentionName)) {
+            tmp += entry.getValue()
+          }
+        }
+
         sender ! tmp.toList
 
       case _ => println("FAILED HERE 2")

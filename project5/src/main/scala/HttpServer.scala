@@ -56,13 +56,63 @@ object HttpServer extends JsonFormats {
       case _: Http.Connected => sender ! Http.Register(self)
 
       case HttpRequest(GET, Uri.Path("/"), _, _, _) =>
-        val body = HttpEntity(ContentTypes.`application/json`, ("OK").toJson.toString)
+        val body = HttpEntity(ContentTypes.`application/json`, "OK")
         sender ! HttpResponse(entity = body)
 
-      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/timeline" =>
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/home_timeline" =>
         var id = path.split("/").last.toInt
         var client = sender
-        val result = (server ? Project4Server.Server.SendTimeline(id)).mapTo[List[Project4Server.Tweets]]
+        val result = (server ? Project4Server.Server.SendHomeTimeline(id)).mapTo[List[Project4Server.Tweets]]
+        result onSuccess {
+          case result: List[Project4Server.Tweets] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/user_timeline" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendUserTimeline(id)).mapTo[List[Project4Server.Tweets]]
+        result onSuccess {
+          case result: List[Project4Server.Tweets] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/followers" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendFollowers(id)).mapTo[List[UserProfile]]
+        result onSuccess {
+          case result: List[UserProfile] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/following" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendFollowing(id)).mapTo[List[UserProfile]]
+        result onSuccess {
+          case result: List[UserProfile] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/user" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendUserProfile(id)).mapTo[UserProfile]
+        result onSuccess {
+          case result: UserProfile =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/mentions" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendMentions(id)).mapTo[List[Project4Server.Tweets]]
         result onSuccess {
           case result: List[Project4Server.Tweets] =>
             val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
@@ -72,10 +122,10 @@ object HttpServer extends JsonFormats {
       case HttpRequest(POST, Uri.Path("/tweet"), _, entity: HttpEntity.NonEmpty, _) =>
         val tweet = entity.data.asString.parseJson.convertTo[SendTweet]
         var client = sender
-        val result = server ? Project4Server.Server.AddTweet(tweet.userId, tweet.time, tweet.msg)
-        result onComplete {
+        val result = (server ? Project4Server.Server.AddTweet(tweet.userId, tweet.time, tweet.msg)).mapTo[String]
+        result onSuccess {
           case result =>
-            client ! HttpResponse(entity = "OK")
+            client ! HttpResponse(entity = result)
         }
 
       case _: HttpRequest => sender ! HttpResponse(status = 404, entity = "Unknown!")

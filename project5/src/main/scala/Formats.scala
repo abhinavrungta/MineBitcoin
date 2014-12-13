@@ -12,8 +12,10 @@ import spray.json.pimpAny
 
 trait JsonFormats extends DefaultJsonProtocol {
   case class SendTweet(userId: Int, time: Long, msg: String)
+  case class UserProfile(id: Int, name: String, statusCount: Int, favoritesCount: Int, followersCount: Int, followingCount: Int)
 
   implicit val tweetFormat = jsonFormat3(SendTweet)
+  implicit val userProfileFormat = jsonFormat6(UserProfile)
 
   implicit object TimelineJsonFormat extends JsonFormat[Project4Server.Tweets] {
     def write(c: Project4Server.Tweets) = JsObject(
@@ -23,7 +25,6 @@ trait JsonFormats extends DefaultJsonProtocol {
       "tweetId" -> JsString(c.tweetId),
       "mentions" -> JsArray(c.mentions.map(_.toJson).toVector),
       "hashTags" -> JsArray(c.hashtags.map(_.toJson).toVector))
-
     def read(value: JsValue) = {
       value.asJsObject.getFields("tweetId", "authorId", "message", "timeStamp", "mentions", "hashTags") match {
         case Seq(JsString(tweetId), JsNumber(authorId), JsString(message), JsString(timeStamp), JsArray(mentions), JsArray(hashTags)) =>
@@ -32,5 +33,4 @@ trait JsonFormats extends DefaultJsonProtocol {
       }
     }
   }
-
 }

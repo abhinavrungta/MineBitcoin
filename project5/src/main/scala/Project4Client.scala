@@ -122,7 +122,11 @@ object Project4Client extends JsonFormats {
   object Client {
     case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long)
     case class Tweet(noOfTweets: Int)
-    case object GetTimeline
+    case object GetHomeTimeline
+    case object GetUserTimeline
+    case object GetFollowers
+    case object GetFollowing
+    case object GetMentions
     case object Stop
   }
 
@@ -199,7 +203,7 @@ object Project4Client extends JsonFormats {
         Initialize(avgNoOfTweets, duration, indexes)
         setAbsoluteTime(absoluteTime)
         var relative = (absoluteTime - System.currentTimeMillis()).toInt
-        cancellable = system.scheduler.schedule(relative milliseconds, 5 second, self, GetTimeline)
+        cancellable = system.scheduler.schedule(relative milliseconds, 5 second, self, GetHomeTimeline)
         runEvent()
 
       case Tweet(noOfTweets: Int) =>
@@ -214,9 +218,49 @@ object Project4Client extends JsonFormats {
         }
         runEvent()
 
-      case GetTimeline =>
+      case GetHomeTimeline =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/timeline/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/home_timeline/" + id)
+        val responseFuture: Future[HttpResponse] = pipeline(request)
+        responseFuture onComplete {
+          case Success(result) =>
+            val tweet = result.entity.data.asString.parseJson.convertTo[List[Project4Server.Tweets]]
+          case Failure(error) =>
+        }
+
+      case GetUserTimeline =>
+        val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/user_timeline/" + id)
+        val responseFuture: Future[HttpResponse] = pipeline(request)
+        responseFuture onComplete {
+          case Success(result) =>
+            val tweet = result.entity.data.asString.parseJson.convertTo[List[Project4Server.Tweets]]
+          case Failure(error) =>
+        }
+
+      case GetFollowers =>
+        val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/followers/" + id)
+        val responseFuture: Future[HttpResponse] = pipeline(request)
+        responseFuture onComplete {
+          case Success(result) =>
+            val followers = result.entity.data.asString.parseJson.convertTo[List[UserProfile]]
+          case Failure(error) =>
+        }
+
+      case GetFollowing =>
+        val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/following/" + id)
+        val responseFuture: Future[HttpResponse] = pipeline(request)
+        responseFuture onComplete {
+          case Success(result) =>
+            val followers = result.entity.data.asString.parseJson.convertTo[List[UserProfile]]
+          case Failure(error) =>
+        }
+
+      case GetMentions =>
+        val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/mentions/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>
