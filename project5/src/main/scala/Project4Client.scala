@@ -25,10 +25,18 @@ import spray.http.HttpEntity
 import spray.http.HttpMethods.GET
 import spray.http.HttpMethods.POST
 import spray.http.HttpRequest
+import spray.http.HttpResponse
 import spray.http.Uri.apply
-import spray.httpx.SprayJsonSupport.sprayJsonUnmarshaller
 import spray.json.DefaultJsonProtocol
+import spray.json.DeserializationException
+import spray.json.JsArray
+import spray.json.JsNumber
+import spray.json.JsObject
+import spray.json.JsString
+import spray.json.JsValue
+import spray.json.JsonFormat
 import spray.json.pimpAny
+import spray.json.pimpString
 
 object Project4Client {
   var ipAddress: String = ""
@@ -126,12 +134,28 @@ object Project4Client {
     case object Stop
   }
 
-  case class RecvTimeline(tweets: Map[String, String])
   case class SendTweet(userId: Int, time: Long, msg: String)
 
   object myJson extends DefaultJsonProtocol {
     implicit val tweetFormat = jsonFormat3(SendTweet)
-    implicit val timelineFormat = jsonFormat1(RecvTimeline)
+
+    implicit object TimelineJsonFormat extends JsonFormat[Project4Server.Tweets] {
+      def write(c: Project4Server.Tweets) = JsObject(
+        "authorId" -> JsNumber(c.authorId),
+        "message" -> JsString(c.message),
+        "timeStamp" -> JsString(c.timeStamp.toString),
+        "tweetId" -> JsString(c.tweetId),
+        "mentions" -> JsArray(c.mentions.map(_.toJson).toVector),
+        "hashTags" -> JsArray(c.hashtags.map(_.toJson).toVector))
+
+      def read(value: JsValue) = {
+        value.asJsObject.getFields("tweetId", "authorId", "message", "timeStamp", "mentions", "hashTags") match {
+          case Seq(JsString(tweetId), JsNumber(authorId), JsString(message), JsString(timeStamp), JsArray(mentions), JsArray(hashTags)) =>
+            new Project4Server.Tweets(tweetId, authorId.toInt, message, timeStamp.toLong, mentions.map(_.convertTo[String]).to[ArrayBuffer], hashTags.map(_.convertTo[String]).to[ArrayBuffer])
+          case _ => throw new DeserializationException("Tweets expected")
+        }
+      }
+    }
   }
 
   class Client(implicit system: ActorSystem) extends Actor {
@@ -208,7 +232,7 @@ object Project4Client {
         Initialize(avgNoOfTweets, duration, indexes)
         setAbsoluteTime(absoluteTime)
         var relative = (absoluteTime - System.currentTimeMillis()).toInt
-        cancellable = system.scheduler.schedule(relative milliseconds, 3 second, self, GetTimeline)
+        cancellable = system.scheduler.schedule(relative milliseconds, 5 second, self, GetTimeline)
         runEvent()
 
       case Tweet(noOfTweets: Int) =>
@@ -218,18 +242,18 @@ object Project4Client {
           val responseFuture: Future[String] = pipeline(request)
           responseFuture onComplete {
             case Success(str) =>
-              println(str)
             case Failure(error) =>
           }
         }
         runEvent()
 
       case GetTimeline =>
-        val pipeline: HttpRequest => Future[RecvTimeline] = sendReceive ~> unmarshal[RecvTimeline]
+        val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
         val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/timeline/" + id)
-        val responseFuture: Future[RecvTimeline] = pipeline(request)
+        val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
-          case Success(RecvTimeline(tweets: Map[String, String])) =>
+          case Success(result) =>
+            val tweet = result.entity.data.asString.parseJson.convertTo[List[Project4Server.Tweets]]
           case Failure(error) =>
         }
 

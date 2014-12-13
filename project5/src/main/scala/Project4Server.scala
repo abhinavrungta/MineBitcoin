@@ -1,11 +1,7 @@
 import java.util.concurrent.atomic.AtomicInteger
-
 import scala.collection.mutable.ArrayBuffer
-import scala.collection.parallel.mutable.ParArray
 import scala.concurrent.duration.DurationInt
-
 import com.typesafe.config.ConfigFactory
-
 import akka.actor.Actor
 import akka.actor.ActorSystem
 import akka.actor.Props
@@ -13,21 +9,36 @@ import akka.actor.Terminated
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
 import akka.routing.SmallestMailboxPool
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 
 object Project4Server {
-  class Tweets(tid: String, id: Int, tweet: String, time: Long) {
-    var AuthorId = id
-    var msg = tweet
+
+  class User(id: Int) {
+    var userId = id
+    var userName = "User" + id
+    var homeTimeline: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
+    var userTimeline: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
+    var favorites: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
+    var followers: CopyOnWriteArrayList[Int] = new CopyOnWriteArrayList()
+    var following: CopyOnWriteArrayList[Int] = new CopyOnWriteArrayList()
+  }
+
+  class Tweets(tid: String, id: Int, tweet: String, time: Long, mentionsList: ArrayBuffer[String] = ArrayBuffer.empty, tags: ArrayBuffer[String] = ArrayBuffer.empty) extends java.io.Serializable {
+    var authorId = id
+    var message = tweet
     var timeStamp: Long = time
     var tweetId = tid
+    var mentions = mentionsList
+    var hashtags = tags
   }
-  var followersList = Array.fill(1)(ParArray.empty[Int])
-  var followingList = Array.fill(1)(ParArray.empty[Int])
+
   var tweetTPS = ArrayBuffer.empty[Int]
   var ctr: AtomicInteger = new AtomicInteger()
-  var rdctr: AtomicInteger = new AtomicInteger()
 
-  var timeLines = Array.fill(1)(new java.util.concurrent.ConcurrentLinkedQueue[Tweets])
+  var users: CopyOnWriteArrayList[User] = new CopyOnWriteArrayList()
+  var tweetStore: ConcurrentHashMap[String, Tweets] = new ConcurrentHashMap()
 
   def main(args: Array[String]) {
     // create an actor system.
@@ -64,9 +75,9 @@ object Project4Server {
       var FollowingPerUser = pdf.exponential(1.0 / 238.0).sample(noOfUsers).map(_.toInt)
       FollowingPerUser = FollowingPerUser.sortBy(a => a)
 
-      // create a list for n users.
-      var followers = Array.fill(noOfUsers)(ArrayBuffer.empty[Int])
-      var following = Array.fill(noOfUsers)(ArrayBuffer.empty[Int])
+      for (i <- 0 to noOfUsers - 1) {
+        users.add(i, new User(i))
+      }
 
       // assign followers to each user.
       for (j <- 0 to noOfUsers - 1) {
@@ -75,23 +86,13 @@ object Project4Server {
         while (FollowingPerUser(j) > 0 && k < noOfUsers) {
           k += 1
           if (k < noOfUsers && FollowersPerUser(k) > 0) {
-            following(j) += k
-            followers(k) += j
+            users.get(j).following.add(k)
+            users.get(k).followers.add(j)
             FollowingPerUser(j) -= 1
             FollowersPerUser(k) -= 1
           }
         }
       }
-
-      followersList = Array.fill(noOfUsers)(scala.collection.parallel.mutable.ParArray.empty[Int])
-      followingList = Array.fill(noOfUsers)(scala.collection.parallel.mutable.ParArray.empty[Int])
-      for (j <- 0 to noOfUsers - 1) {
-        followersList(j) = followers(j).toArray.par
-        followingList(j) = following(j).toArray.par
-      }
-
-      // initialize timelines data.
-      timeLines = Array.fill(noOfUsers)(new java.util.concurrent.ConcurrentLinkedQueue[Tweets]())
       println("Server started")
     }
 
@@ -109,10 +110,6 @@ object Project4Server {
       case Terminated(ref) =>
         if (ref == router) {
           println(tweetTPS)
-          println(rdctr.get())
-          for (j <- 0 to followersList.size - 1) {
-            //            println(timeLines(j).size)
-          }
           system.shutdown
         }
 
@@ -132,25 +129,25 @@ object Project4Server {
     // Receive block for the Server.
     final def receive = LoggingReceive {
       case AddTweet(userId, time, msg) =>
-        var tweetId = ctr.addAndGet(1) // generate tweetId.
-        var tmp = new Tweets(tweetId.toString, userId, msg, time)
+        var tweetId = ctr.addAndGet(1).toString // generate tweetId.
+        var tmp = new Tweets(tweetId, userId, msg, time)
+        tweetStore.put(tweetId, tmp)
 
-        var followers = followersList(userId) // get all followers and add tweet to their timeline
-        followers.foreach(a => { timeLines(a).add(tmp); if (timeLines(a).size() > 100) { timeLines(a).remove() } })
-        timeLines(userId).add(tmp) // add to self timeline also
+        var followers = users.get(userId).followers.iterator() // get all followers and add tweet to their timeline
+        while (followers.hasNext()) {
+          users.get(followers.next()).homeTimeline.add(tweetId)
+        }
+        users.get(userId).userTimeline.add(tweetId) // add to self timeline also
+        sender ! "OK"
 
       case SendTimeline(userId) =>
-        rdctr.addAndGet(1)
-        var tweetIds = timeLines(userId)
-        var tmp: Map[String, String] = Map()
-        if (!tweetIds.isEmpty) {
-          var itr = tweetIds.iterator()
-          while (itr.hasNext()) {
-            tmp += (itr.next().tweetId -> "OK")
-          }
+        var tweetIds = users.get(userId).homeTimeline
+        var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
+        var itr = tweetIds.iterator()
+        while (itr.hasNext()) {
+          tmp += tweetStore.get(itr.next())
         }
-        tmp += ("0" -> "OOO")
-        sender ! tmp
+        sender ! tmp.toList
 
       case _ => println("FAILED HERE 2")
     }

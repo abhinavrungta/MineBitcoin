@@ -1,9 +1,6 @@
 import java.net.InetAddress
-
 import scala.concurrent.duration.DurationInt
-
 import com.typesafe.config.ConfigFactory
-
 import akka.actor.Actor
 import akka.actor.ActorSelection
 import akka.actor.ActorSystem
@@ -23,9 +20,8 @@ import spray.http.HttpRequest
 import spray.http.HttpResponse
 import spray.http.StatusCode.int2StatusCode
 import spray.http.Uri
-import spray.json.DefaultJsonProtocol
-import spray.json.pimpAny
-import spray.json.pimpString
+import spray.json._
+import scala.collection.mutable.ArrayBuffer
 
 object HttpServer {
 
@@ -48,18 +44,32 @@ object HttpServer {
     }
   }
 
-  case class RecvTimeline(tweets: Map[String, String])
   case class SendTweet(userId: Int, time: Long, msg: String)
 
   object myJson extends DefaultJsonProtocol {
     implicit val tweetFormat = jsonFormat3(SendTweet)
-    implicit val timelineFormat = jsonFormat1(RecvTimeline)
+    implicit object TimelineJsonFormat extends JsonFormat[Project4Server.Tweets] {
+      def write(c: Project4Server.Tweets) = JsObject(
+        "authorId" -> JsNumber(c.authorId),
+        "message" -> JsString(c.message),
+        "timeStamp" -> JsString(c.timeStamp.toString),
+        "tweetId" -> JsString(c.tweetId),
+        "mentions" -> JsArray(c.mentions.map(_.toJson).toVector),
+        "hashTags" -> JsArray(c.hashtags.map(_.toJson).toVector))
 
+      def read(value: JsValue) = {
+        value.asJsObject.getFields("tweetId", "authorId", "message", "timeStamp", "mentions", "hashTags") match {
+          case Seq(JsString(tweetId), JsNumber(authorId), JsString(message), JsString(timeStamp), JsArray(mentions), JsArray(hashTags)) =>
+            new Project4Server.Tweets(tweetId, authorId.toInt, message, timeStamp.toLong, mentions.to[ArrayBuffer].map(a => a.convertTo[String]), hashTags.to[ArrayBuffer].map(a => a.convertTo[String]))
+          case _ => throw new DeserializationException("Tweets expected")
+        }
+      }
+    }
   }
 
   class DemoService(server: ActorSelection) extends Actor {
     import myJson._
-    implicit val timeout: Timeout = 10.second // for the actor 'asks'
+    implicit val timeout: Timeout = 5.second // for the actor 'asks'
     import context.dispatcher // ExecutionContext for the futures and scheduler
 
     def receive = {
@@ -73,11 +83,10 @@ object HttpServer {
       case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/timeline" =>
         var id = path.split("/").last.toInt
         var client = sender
-
-        val result = (server ? Project4Server.Server.SendTimeline(id)).mapTo[Map[String, String]]
+        val result = (server ? Project4Server.Server.SendTimeline(id)).mapTo[List[Project4Server.Tweets]]
         result onSuccess {
-          case result: Map[String, String] =>
-            val body = HttpEntity(ContentTypes.`application/json`, RecvTimeline(result).toJson.toString)
+          case result: List[Project4Server.Tweets] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
             client ! HttpResponse(entity = body)
         }
 
