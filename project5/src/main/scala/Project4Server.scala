@@ -1,7 +1,13 @@
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
+
 import com.typesafe.config.ConfigFactory
+
 import akka.actor.Actor
 import akka.actor.ActorSystem
 import akka.actor.Props
@@ -9,9 +15,6 @@ import akka.actor.Terminated
 import akka.actor.actorRef2Scala
 import akka.event.LoggingReceive
 import akka.routing.SmallestMailboxPool
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 
 object Project4Server {
 
@@ -42,7 +45,7 @@ object Project4Server {
 
   def main(args: Array[String]) {
     // create an actor system.
-    val system = ActorSystem("TwitterServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 12000 , "maximum-frame-size" : 1280000b } } } } } """)))
+    val system = ActorSystem("TwitterServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 12000 , "maximum-frame-size" : 12800000b } } } } } """)))
 
     // creates a watcher Actor. In the constructor, it initializes nodesArr and creates followers and following list
     val watcher = system.actorOf(Props(new Watcher()), name = "Watcher")

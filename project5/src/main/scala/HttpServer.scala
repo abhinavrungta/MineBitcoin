@@ -1,6 +1,9 @@
 import java.net.InetAddress
+
 import scala.concurrent.duration.DurationInt
+
 import com.typesafe.config.ConfigFactory
+
 import akka.actor.Actor
 import akka.actor.ActorSelection
 import akka.actor.ActorSystem
@@ -20,17 +23,17 @@ import spray.http.HttpRequest
 import spray.http.HttpResponse
 import spray.http.StatusCode.int2StatusCode
 import spray.http.Uri
-import spray.json._
-import scala.collection.mutable.ArrayBuffer
+import spray.json.pimpAny
+import spray.json.pimpString
 
-object HttpServer {
+object HttpServer extends JsonFormats {
 
   def main(args: Array[String]) {
     if (args.length < 1) {
       println("INVALID NO OF ARGS.  USAGE :")
       System.exit(1)
     } else if (args.length == 1) {
-      implicit val system = ActorSystem("HTTPServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 11000 , "maximum-frame-size" : 1280000b } } } } } """)))
+      implicit val system = ActorSystem("HTTPServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 11000 , "maximum-frame-size" : 12800000b } } } } } """)))
 
       var privateIp = args(0)
       val server = system.actorSelection("akka.tcp://TwitterServer@" + privateIp + ":12000/user/Watcher/Router")
@@ -44,31 +47,7 @@ object HttpServer {
     }
   }
 
-  case class SendTweet(userId: Int, time: Long, msg: String)
-
-  object myJson extends DefaultJsonProtocol {
-    implicit val tweetFormat = jsonFormat3(SendTweet)
-    implicit object TimelineJsonFormat extends JsonFormat[Project4Server.Tweets] {
-      def write(c: Project4Server.Tweets) = JsObject(
-        "authorId" -> JsNumber(c.authorId),
-        "message" -> JsString(c.message),
-        "timeStamp" -> JsString(c.timeStamp.toString),
-        "tweetId" -> JsString(c.tweetId),
-        "mentions" -> JsArray(c.mentions.map(_.toJson).toVector),
-        "hashTags" -> JsArray(c.hashtags.map(_.toJson).toVector))
-
-      def read(value: JsValue) = {
-        value.asJsObject.getFields("tweetId", "authorId", "message", "timeStamp", "mentions", "hashTags") match {
-          case Seq(JsString(tweetId), JsNumber(authorId), JsString(message), JsString(timeStamp), JsArray(mentions), JsArray(hashTags)) =>
-            new Project4Server.Tweets(tweetId, authorId.toInt, message, timeStamp.toLong, mentions.to[ArrayBuffer].map(a => a.convertTo[String]), hashTags.to[ArrayBuffer].map(a => a.convertTo[String]))
-          case _ => throw new DeserializationException("Tweets expected")
-        }
-      }
-    }
-  }
-
   class DemoService(server: ActorSelection) extends Actor {
-    import myJson._
     implicit val timeout: Timeout = 5.second // for the actor 'asks'
     import context.dispatcher // ExecutionContext for the futures and scheduler
 

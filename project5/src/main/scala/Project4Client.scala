@@ -27,18 +27,10 @@ import spray.http.HttpMethods.POST
 import spray.http.HttpRequest
 import spray.http.HttpResponse
 import spray.http.Uri.apply
-import spray.json.DefaultJsonProtocol
-import spray.json.DeserializationException
-import spray.json.JsArray
-import spray.json.JsNumber
-import spray.json.JsObject
-import spray.json.JsString
-import spray.json.JsValue
-import spray.json.JsonFormat
 import spray.json.pimpAny
 import spray.json.pimpString
 
-object Project4Client {
+object Project4Client extends JsonFormats {
   var ipAddress: String = ""
   def main(args: Array[String]) {
     // exit if arguments not passed as command line param.
@@ -51,7 +43,7 @@ object Project4Client {
       ipAddress = args(2)
 
       // create actor system and a watcher actor.
-      val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 , "maximum-frame-size" : 1280000b } } } } } """)))
+      val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 , "maximum-frame-size" : 12800000b } } } } } """)))
       // creates a watcher Actor.
       val watcher = system.actorOf(Props(new Watcher(noOfUsers, avgTweetsPerSecond, ipAddress)), name = "Watcher")
     }
@@ -134,34 +126,9 @@ object Project4Client {
     case object Stop
   }
 
-  case class SendTweet(userId: Int, time: Long, msg: String)
-
-  object myJson extends DefaultJsonProtocol {
-    implicit val tweetFormat = jsonFormat3(SendTweet)
-
-    implicit object TimelineJsonFormat extends JsonFormat[Project4Server.Tweets] {
-      def write(c: Project4Server.Tweets) = JsObject(
-        "authorId" -> JsNumber(c.authorId),
-        "message" -> JsString(c.message),
-        "timeStamp" -> JsString(c.timeStamp.toString),
-        "tweetId" -> JsString(c.tweetId),
-        "mentions" -> JsArray(c.mentions.map(_.toJson).toVector),
-        "hashTags" -> JsArray(c.hashtags.map(_.toJson).toVector))
-
-      def read(value: JsValue) = {
-        value.asJsObject.getFields("tweetId", "authorId", "message", "timeStamp", "mentions", "hashTags") match {
-          case Seq(JsString(tweetId), JsNumber(authorId), JsString(message), JsString(timeStamp), JsArray(mentions), JsArray(hashTags)) =>
-            new Project4Server.Tweets(tweetId, authorId.toInt, message, timeStamp.toLong, mentions.map(_.convertTo[String]).to[ArrayBuffer], hashTags.map(_.convertTo[String]).to[ArrayBuffer])
-          case _ => throw new DeserializationException("Tweets expected")
-        }
-      }
-    }
-  }
-
   class Client(implicit system: ActorSystem) extends Actor {
     import context._
     import Client._
-    import myJson._
 
     /* Constructor Started */
     var events = ArrayBuffer.empty[Event]
