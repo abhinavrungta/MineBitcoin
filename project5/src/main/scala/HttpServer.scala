@@ -39,7 +39,7 @@ object HttpServer extends JsonFormats {
       val server = system.actorSelection("akka.tcp://TwitterServer@" + privateIp + ":12000/user/Watcher/Router")
 
       // the handler actor replies to incoming HttpRequests
-      val handler = system.actorOf(Props(new DemoService(server)), name = "handler")
+      val handler = system.actorOf(Props(new HttpService(server)), name = "handler")
 
       val ipAddress = InetAddress.getLocalHost.getHostAddress()
       implicit val timeout: Timeout = 10.second // for the actor 'asks'
@@ -47,7 +47,7 @@ object HttpServer extends JsonFormats {
     }
   }
 
-  class DemoService(server: ActorSelection) extends Actor {
+  class HttpService(server: ActorSelection) extends Actor {
     implicit val timeout: Timeout = 5.second // for the actor 'asks'
     import context.dispatcher // ExecutionContext for the futures and scheduler
 
@@ -58,6 +58,15 @@ object HttpServer extends JsonFormats {
       case HttpRequest(GET, Uri.Path("/"), _, _, _) =>
         val body = HttpEntity(ContentTypes.`application/json`, "OK")
         sender ! HttpResponse(entity = body)
+
+      case HttpRequest(POST, Uri.Path("/tweet"), _, entity: HttpEntity.NonEmpty, _) =>
+        val tweet = entity.data.asString.parseJson.convertTo[SendTweet]
+        var client = sender
+        val result = (server ? Project4Server.Server.AddTweet(tweet.userId, tweet.time, tweet.msg)).mapTo[String]
+        result onSuccess {
+          case result =>
+            client ! HttpResponse(entity = result)
+        }
 
       case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/home_timeline" =>
         var id = path.split("/").last.toInt
@@ -75,6 +84,26 @@ object HttpServer extends JsonFormats {
         val result = (server ? Project4Server.Server.SendUserTimeline(id)).mapTo[List[Project4Server.Tweets]]
         result onSuccess {
           case result: List[Project4Server.Tweets] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/mentions" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendMentions(id)).mapTo[List[Project4Server.Tweets]]
+        result onSuccess {
+          case result: List[Project4Server.Tweets] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/user" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendUserProfile(id)).mapTo[List[UserProfile]]
+        result onSuccess {
+          case result: List[UserProfile] =>
             val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
             client ! HttpResponse(entity = body)
         }
@@ -99,33 +128,23 @@ object HttpServer extends JsonFormats {
             client ! HttpResponse(entity = body)
         }
 
-      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/user" =>
-        var id = path.split("/").last.toInt
+      case HttpRequest(POST, Uri.Path("/msg"), _, entity: HttpEntity.NonEmpty, _) =>
+        val tweet = entity.data.asString.parseJson.convertTo[SendMsg]
         var client = sender
-        val result = (server ? Project4Server.Server.SendUserProfile(id)).mapTo[List[UserProfile]]
-        result onSuccess {
-          case result: List[UserProfile] =>
-            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
-            client ! HttpResponse(entity = body)
-        }
-
-      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/mentions" =>
-        var id = path.split("/").last.toInt
-        var client = sender
-        val result = (server ? Project4Server.Server.SendMentions(id)).mapTo[List[Project4Server.Tweets]]
-        result onSuccess {
-          case result: List[Project4Server.Tweets] =>
-            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
-            client ! HttpResponse(entity = body)
-        }
-
-      case HttpRequest(POST, Uri.Path("/tweet"), _, entity: HttpEntity.NonEmpty, _) =>
-        val tweet = entity.data.asString.parseJson.convertTo[SendTweet]
-        var client = sender
-        val result = (server ? Project4Server.Server.AddTweet(tweet.userId, tweet.time, tweet.msg)).mapTo[String]
+        val result = (server ? Project4Server.Server.AddMsg(tweet.senderId, tweet.time, tweet.msg, tweet.recepientId)).mapTo[String]
         result onSuccess {
           case result =>
             client ! HttpResponse(entity = result)
+        }
+
+      case HttpRequest(GET, Uri.Path(path), _, _, _) if path startsWith "/msg" =>
+        var id = path.split("/").last.toInt
+        var client = sender
+        val result = (server ? Project4Server.Server.SendMessages(id)).mapTo[List[Project4Server.Messages]]
+        result onSuccess {
+          case result: List[Project4Server.Messages] =>
+            val body = HttpEntity(ContentTypes.`application/json`, result.toJson.toString)
+            client ! HttpResponse(entity = body)
         }
 
       case _: HttpRequest => sender ! HttpResponse(status = 404, entity = "Unknown!")

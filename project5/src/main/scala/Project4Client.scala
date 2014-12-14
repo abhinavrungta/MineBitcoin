@@ -122,6 +122,8 @@ object Project4Client extends JsonFormats {
   object Client {
     case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long)
     case class Tweet(noOfTweets: Int)
+    case class Msg(rId: Int)
+    case object GetMessages
     case object GetHomeTimeline
     case object GetUserTimeline
     case object GetFollowers
@@ -217,6 +219,25 @@ object Project4Client extends JsonFormats {
           }
         }
         runEvent()
+
+      case Msg(rId: Int) =>
+        val pipeline: HttpRequest => Future[String] = sendReceive ~> unmarshal[String]
+        val request = HttpRequest(method = POST, uri = "http://" + ipAddress + ":8080/msg", entity = HttpEntity(ContentTypes.`application/json`, SendMsg(id, System.currentTimeMillis(), generateTweet(), rId).toJson.toString))
+        val responseFuture: Future[String] = pipeline(request)
+        responseFuture onComplete {
+          case Success(str) =>
+          case Failure(error) =>
+        }
+
+      case GetMessages =>
+        val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/msg/" + id)
+        val responseFuture: Future[HttpResponse] = pipeline(request)
+        responseFuture onComplete {
+          case Success(result) =>
+            val tweet = result.entity.data.asString.parseJson.convertTo[List[Project4Server.Messages]]
+          case Failure(error) =>
+        }
 
       case GetHomeTimeline =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive

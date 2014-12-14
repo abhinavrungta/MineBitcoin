@@ -25,6 +25,7 @@ object Project4Server {
     var homeTimeline: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
     var userTimeline: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
     var favorites: ConcurrentLinkedQueue[String] = new ConcurrentLinkedQueue()
+    var messages: ArrayBuffer[String] = ArrayBuffer.empty
     var followers: CopyOnWriteArrayList[Int] = new CopyOnWriteArrayList()
     var following: CopyOnWriteArrayList[Int] = new CopyOnWriteArrayList()
   }
@@ -38,11 +39,16 @@ object Project4Server {
     var hashtags = tags
   }
 
+  class Messages(rid: Int, tid: String, id: Int, tweet: String, time: Long, mentionsList: ArrayBuffer[String] = ArrayBuffer.empty, tags: ArrayBuffer[String] = ArrayBuffer.empty) extends Tweets(tid, id, tweet, time, mentionsList, tags) {
+    var recepientId = rid
+  }
+
   var tweetTPS = ArrayBuffer.empty[Int]
   var ctr: AtomicInteger = new AtomicInteger()
 
   var users: CopyOnWriteArrayList[User] = new CopyOnWriteArrayList()
   var tweetStore: ConcurrentHashMap[String, Tweets] = new ConcurrentHashMap()
+  var msgStore: ConcurrentHashMap[String, Messages] = new ConcurrentHashMap()
 
   def main(args: Array[String]) {
     // create an actor system.
@@ -123,6 +129,8 @@ object Project4Server {
 
   object Server {
     case class AddTweet(userId: Int, time: Long, msg: String)
+    case class AddMsg(sId: Int, time: Long, msg: String, rId: Int)
+    case class SendMessages(userId: Int)
     case class SendHomeTimeline(userId: Int)
     case class SendUserTimeline(userId: Int)
     case class SendFollowers(userId: Int)
@@ -163,6 +171,39 @@ object Project4Server {
         }
         users.get(userId).userTimeline.add(tweetId) // add to self timeline also
         sender ! tweetId
+
+      case AddMsg(sId, time, msg, rId) =>
+        var regexMentions = "@[a-zA-Z0-9]+\\s*".r
+        var regexTags = "#[a-zA-Z0-9]+\\s*".r
+        var tweetId = ctr.addAndGet(1).toString // generate tweetId.
+        var tmp = new Messages(rId, tweetId, sId, msg, time)
+
+        // extract mentions and store in tweet object
+        var itr = regexMentions.findAllMatchIn(msg)
+        while (itr.hasNext) {
+          tmp.mentions += itr.next().toString.trim
+        }
+
+        // extract tags and store in tweet object
+        itr = regexTags.findAllMatchIn(msg)
+        while (itr.hasNext) {
+          tmp.hashtags += itr.next().toString.trim
+        }
+
+        msgStore.put(tweetId, tmp)
+        users.get(sId).messages += tweetId // add to self timeline also
+        users.get(rId).messages += tweetId // add to self timeline also
+
+        sender ! tweetId
+
+      case SendMessages(userId) =>
+        var tweetIds = users.get(userId).messages
+        var tmp: ArrayBuffer[Messages] = ArrayBuffer.empty
+        var itr = tweetIds.iterator
+        while (itr.hasNext) {
+          tmp += msgStore.get(itr.next())
+        }
+        sender ! tmp.toList
 
       case SendHomeTimeline(userId) =>
         var tweetIds = users.get(userId).homeTimeline
