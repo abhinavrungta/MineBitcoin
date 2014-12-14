@@ -1,36 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <classpath>
-  <classpathentry output="target/scala-2.11/classes" kind="src" path="src/main/scala"/>
-  <classpathentry output="target/scala-2.11/classes" kind="src" path="src/main/java"/>
-  <classpathentry output="target/scala-2.11/test-classes" kind="src" path="src/test/scala"/>
-  <classpathentry output="target/scala-2.11/test-classes" kind="src" path="src/test/java"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scala-lang.modules/scala-xml_2.11/bundles/scala-xml_2.11-1.0.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-can_2.11/bundles/spray-can_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-io_2.11/bundles/spray-io_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-util_2.11/bundles/spray-util_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-http_2.11/bundles/spray-http_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.parboiled/parboiled-scala_2.11/bundles/parboiled-scala_2.11-1.1.6.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.parboiled/parboiled-core/bundles/parboiled-core-1.1.6.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-routing_2.11/bundles/spray-routing_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-httpx_2.11/bundles/spray-httpx_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.jvnet.mimepull/mimepull/jars/mimepull-1.9.4.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.chuusai/shapeless_2.11/jars/shapeless_2.11-1.2.4.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-client_2.11/bundles/spray-client_2.11-1.3.2.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-json_2.11/bundles/spray-json_2.11-1.3.1.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.typesafe.akka/akka-actor_2.11/jars/akka-actor_2.11-2.3.7.jar"/>
-  <classpathentry kind="con" path="org.scala-ide.sdt.launching.SCALA_CONTAINER"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.typesafe/config/bundles/config-1.2.1.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.typesafe.akka/akka-remote_2.11/jars/akka-remote_2.11-2.3.7.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.netty/netty/bundles/netty-3.8.0.Final.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.google.protobuf/protobuf-java/bundles/protobuf-java-2.5.0.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.uncommons.maths/uncommons-maths/jars/uncommons-maths-1.2.2a.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/commons-lang/commons-lang/jars/commons-lang-2.6.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.specs2/specs2-core_2.11/jars/specs2-core_2.11-2.3.11.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.specs2/specs2-matcher_2.11/jars/specs2-matcher_2.11-2.3.11.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.specs2/specs2-common_2.11/jars/specs2-common_2.11-2.3.11.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scalaz/scalaz-core_2.11/bundles/scalaz-core_2.11-7.0.6.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scala-lang.modules/scala-parser-combinators_2.11/bundles/scala-parser-combinators_2.11-1.0.1.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scalaz/scalaz-concurrent_2.11/bundles/scalaz-concurrent_2.11-7.0.6.jar"/>
-  <classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scalaz/scalaz-effect_2.11/bundles/scalaz-effect_2.11-7.0.6.jar"/>
-  <classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
-  <classpathentry kind="output" path="bin"/>
+	<classpathentry kind="src" path="src"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scala-lang.modules/scala-xml_2.11/bundles/scala-xml_2.11-1.0.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-can_2.11/bundles/spray-can_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-io_2.11/bundles/spray-io_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-util_2.11/bundles/spray-util_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-http_2.11/bundles/spray-http_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.parboiled/parboiled-scala_2.11/bundles/parboiled-scala_2.11-1.1.6.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.parboiled/parboiled-core/bundles/parboiled-core-1.1.6.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-routing_2.11/bundles/spray-routing_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-httpx_2.11/bundles/spray-httpx_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.jvnet.mimepull/mimepull/jars/mimepull-1.9.4.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.chuusai/shapeless_2.11/jars/shapeless_2.11-1.2.4.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-client_2.11/bundles/spray-client_2.11-1.3.2.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.spray/spray-json_2.11/bundles/spray-json_2.11-1.3.1.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.typesafe.akka/akka-actor_2.11/jars/akka-actor_2.11-2.3.7.jar"/>
+	<classpathentry kind="con" path="org.scala-ide.sdt.launching.SCALA_CONTAINER"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.typesafe/config/bundles/config-1.2.1.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.typesafe.akka/akka-remote_2.11/jars/akka-remote_2.11-2.3.7.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/io.netty/netty/bundles/netty-3.8.0.Final.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/com.google.protobuf/protobuf-java/bundles/protobuf-java-2.5.0.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.uncommons.maths/uncommons-maths/jars/uncommons-maths-1.2.2a.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/commons-lang/commons-lang/jars/commons-lang-2.6.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.specs2/specs2-core_2.11/jars/specs2-core_2.11-2.3.11.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.specs2/specs2-matcher_2.11/jars/specs2-matcher_2.11-2.3.11.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.specs2/specs2-common_2.11/jars/specs2-common_2.11-2.3.11.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scalaz/scalaz-core_2.11/bundles/scalaz-core_2.11-7.0.6.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scala-lang.modules/scala-parser-combinators_2.11/bundles/scala-parser-combinators_2.11-1.0.1.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scalaz/scalaz-concurrent_2.11/bundles/scalaz-concurrent_2.11-7.0.6.jar"/>
+	<classpathentry kind="lib" path="/Users/abhinavrungta/.ivy2/cache/org.scalaz/scalaz-effect_2.11/bundles/scalaz-effect_2.11-7.0.6.jar"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="output" path="bin"/>
 </classpath>
