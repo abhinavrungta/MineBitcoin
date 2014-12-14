@@ -1,5 +1,9 @@
 name := "project5"
 
+exportJars := true
+
+mainClass := Some("main.scala.MainApp")
+
 version := "1.0"
 
 scalaVersion := "2.11.2"
@@ -25,3 +29,5 @@ libraryDependencies ++= {
     "org.specs2"          %%  "specs2-core"   % "2.3.11" % "test"
   )
 }
+
+libraryDependencies += "commons-lang" % "commons-lang" % "2.6"

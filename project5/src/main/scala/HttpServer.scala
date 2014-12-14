@@ -1,3 +1,5 @@
+package main.scala
+
 import java.net.InetAddress
 
 import scala.concurrent.duration.DurationInt

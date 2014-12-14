@@ -1,3 +1,5 @@
+package main.scala
+
 import scala.collection.mutable.ArrayBuffer
 
 import spray.json.DefaultJsonProtocol

@@ -1,3 +1,5 @@
+package main.scala
+
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.Future
 import scala.concurrent.duration.DurationInt
@@ -9,7 +11,6 @@ import com.typesafe.config.ConfigFactory
 
 import akka.actor.Actor
 import akka.actor.ActorRef
-import akka.actor.ActorSelection.toScala
 import akka.actor.ActorSystem
 import akka.actor.Cancellable
 import akka.actor.Props
@@ -90,10 +91,6 @@ object Project4Client extends JsonFormats {
       nodesArr += node
       context.watch(node)
     }
-
-    // Initiate Server with no of Users.
-    val server = actorSelection("akka.tcp://TwitterServer@" + ipAddress + ":12000/user/Watcher")
-    server ! Project4Server.Watcher.Init(noOfUsers)
 
     var startTime = System.currentTimeMillis()
     // end of constructor

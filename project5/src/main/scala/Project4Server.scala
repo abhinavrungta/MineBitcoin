@@ -1,3 +1,5 @@
+package main.scala
+
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CopyOnWriteArrayList
@@ -56,6 +58,8 @@ object Project4Server {
 
     // creates a watcher Actor. In the constructor, it initializes nodesArr and creates followers and following list
     val watcher = system.actorOf(Props(new Watcher()), name = "Watcher")
+
+    watcher ! Project4Server.Watcher.Init(args(0).toInt)
   }
 
   object Watcher {

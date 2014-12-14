@@ -1,3 +1,5 @@
+package main.scala
+
 import scala.collection.mutable.ArrayBuffer
 
 trait Distribution[A] {
