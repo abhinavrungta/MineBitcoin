@@ -31,21 +31,22 @@ import spray.json.pimpString
 object HttpServer extends JsonFormats {
 
   def main(args: Array[String]) {
-    if (args.length < 1) {
+    if (args.length < 2) {
       println("INVALID NO OF ARGS.  USAGE :")
       System.exit(1)
-    } else if (args.length == 1) {
+    } else if (args.length == 2) {
       implicit val system = ActorSystem("HTTPServer", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 11000 , "maximum-frame-size" : 12800000b } } } } } """)))
 
       var privateIp = args(0)
       val server = system.actorSelection("akka.tcp://TwitterServer@" + privateIp + ":12000/user/Watcher/Router")
-
-      // the handler actor replies to incoming HttpRequests
-      val handler = system.actorOf(Props(new HttpService(server)), name = "handler")
-
       val ipAddress = InetAddress.getLocalHost.getHostAddress()
       implicit val timeout: Timeout = 10.second // for the actor 'asks'
-      IO(Http) ? Http.Bind(handler, interface = ipAddress, port = 8080)
+
+      for (i <- 0 to args(1).toInt - 1) {
+        // the handler actor replies to incoming HttpRequests
+        val handler = system.actorOf(Props(new HttpService(server)), name = "handler" + i)
+        IO(Http) ? Http.Bind(handler, interface = ipAddress, port = 8080 + i * 4)
+      }
     }
   }
 

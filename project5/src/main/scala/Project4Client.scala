@@ -33,31 +33,35 @@ import spray.json.pimpString
 
 object Project4Client extends JsonFormats {
   var ipAddress: String = ""
+  var initPort = 8080
+  var noOfPorts = 0
   def main(args: Array[String]) {
     // exit if arguments not passed as command line param.
-    if (args.length < 3) {
+    if (args.length < 4) {
       println("INVALID NO OF ARGS.  USAGE :")
       System.exit(1)
-    } else if (args.length == 3) {
+    } else if (args.length == 4) {
       var avgTweetsPerSecond = args(0).toInt
       var noOfUsers = args(1).toInt
       ipAddress = args(2)
+      noOfPorts = args(3).toInt
 
       // create actor system and a watcher actor.
       val system = ActorSystem("TwitterClients", ConfigFactory.load(ConfigFactory.parseString("""{ "akka" : { "actor" : { "provider" : "akka.remote.RemoteActorRefProvider" }, "remote" : { "enabled-transports" : [ "akka.remote.netty.tcp" ], "netty" : { "tcp" : { "port" : 13000 , "maximum-frame-size" : 12800000b } } } } } """)))
       // creates a watcher Actor.
-      val watcher = system.actorOf(Props(new Watcher(noOfUsers, avgTweetsPerSecond, ipAddress)), name = "Watcher")
+      val watcher = system.actorOf(Props(new Watcher(noOfUsers, avgTweetsPerSecond)), name = "Watcher")
     }
   }
   object Watcher {
     case class Terminate(node: ActorRef)
   }
 
-  class Watcher(noOfUsers: Int, avgTweetsPerSecond: Int, ipAddress: String) extends Actor {
+  class Watcher(noOfUsers: Int, avgTweetsPerSecond: Int) extends Actor {
     import context._
     import Watcher._
 
     val pdf = new PDF()
+    val rnd = new Random
 
     // 307 => mean (avg tweets per user).	sample(size) => size is the no of Users.
     var TweetsPerUser = pdf.exponential(1.0 / 307.0).sample(noOfUsers).map(_.toInt)
@@ -70,7 +74,6 @@ object Project4Client extends JsonFormats {
     // get times for 5% of duration. Duration is relative -> 1 to N
     var percent5 = (duration * 0.05).toInt
     var indexes = ArrayBuffer.empty[Int]
-    val rnd = new Random
     for (i <- 1 to percent5) {
       var tmp = rnd.nextInt(duration)
       while (indexes.contains(tmp)) {
@@ -85,9 +88,10 @@ object Project4Client extends JsonFormats {
     var absoluteStartTime = System.currentTimeMillis() + (10 * 1000)
     // create given number of clients and initialize.
     for (i <- 0 to noOfUsers - 1) {
+      var port = initPort + rnd.nextInt(noOfPorts) * 4
       var node = actorOf(Props(new Client()), name = "" + i)
       // Initialize Clients with info like #Tweets, duration of tweets, start Time, router address. 
-      node ! Client.Init(TweetsPerUser(i), duration, indexes, absoluteStartTime)
+      node ! Client.Init(TweetsPerUser(i), duration, indexes, absoluteStartTime, port)
       nodesArr += node
       context.watch(node)
     }
@@ -117,7 +121,7 @@ object Project4Client extends JsonFormats {
   }
 
   object Client {
-    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long)
+    case class Init(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int], absoluteTime: Long, port: Int)
     case class Tweet(noOfTweets: Int)
     case class Msg(rId: Int)
     case object GetMessages
@@ -140,6 +144,7 @@ object Project4Client extends JsonFormats {
     var cancellable: Cancellable = null
     var ctr = 0
     var endTime: Long = 0
+    var port = 0
     /* Constructor Ended */
 
     def Initialize(avgNoOfTweets: Int, duration: Int, indexes: ArrayBuffer[Int]) {
@@ -198,8 +203,9 @@ object Project4Client extends JsonFormats {
 
     // Receive block when in Initializing State before Node is Alive.
     final def receive = LoggingReceive {
-      case Init(avgNoOfTweets, duration, indexes, absoluteTime) =>
+      case Init(avgNoOfTweets, duration, indexes, absoluteTime, portNo) =>
         Initialize(avgNoOfTweets, duration, indexes)
+        port = portNo
         setAbsoluteTime(absoluteTime)
         var relative = (absoluteTime - System.currentTimeMillis()).toInt
         cancellable = system.scheduler.schedule(relative milliseconds, 5 second, self, GetHomeTimeline)
@@ -208,7 +214,7 @@ object Project4Client extends JsonFormats {
       case Tweet(noOfTweets: Int) =>
         for (j <- 1 to noOfTweets) {
           val pipeline: HttpRequest => Future[String] = sendReceive ~> unmarshal[String]
-          val request = HttpRequest(method = POST, uri = "http://" + ipAddress + ":8080/tweet", entity = HttpEntity(ContentTypes.`application/json`, SendTweet(id, System.currentTimeMillis(), generateTweet()).toJson.toString))
+          val request = HttpRequest(method = POST, uri = "http://" + ipAddress + ":" + port + "/tweet", entity = HttpEntity(ContentTypes.`application/json`, SendTweet(id, System.currentTimeMillis(), generateTweet()).toJson.toString))
           val responseFuture: Future[String] = pipeline(request)
           responseFuture onComplete {
             case Success(str) =>
@@ -219,7 +225,7 @@ object Project4Client extends JsonFormats {
 
       case Msg(rId: Int) =>
         val pipeline: HttpRequest => Future[String] = sendReceive ~> unmarshal[String]
-        val request = HttpRequest(method = POST, uri = "http://" + ipAddress + ":8080/msg", entity = HttpEntity(ContentTypes.`application/json`, SendMsg(id, System.currentTimeMillis(), generateTweet(), rId).toJson.toString))
+        val request = HttpRequest(method = POST, uri = "http://" + ipAddress + ":" + port + "/msg", entity = HttpEntity(ContentTypes.`application/json`, SendMsg(id, System.currentTimeMillis(), generateTweet(), rId).toJson.toString))
         val responseFuture: Future[String] = pipeline(request)
         responseFuture onComplete {
           case Success(str) =>
@@ -228,7 +234,7 @@ object Project4Client extends JsonFormats {
 
       case GetMessages =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/msg/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":" + port + "/msg/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>
@@ -238,7 +244,7 @@ object Project4Client extends JsonFormats {
 
       case GetHomeTimeline =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/home_timeline/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":" + port + "/home_timeline/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>
@@ -248,7 +254,7 @@ object Project4Client extends JsonFormats {
 
       case GetUserTimeline =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/user_timeline/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":" + port + "/user_timeline/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>
@@ -258,7 +264,7 @@ object Project4Client extends JsonFormats {
 
       case GetFollowers =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/followers/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":" + port + "/followers/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>
@@ -268,7 +274,7 @@ object Project4Client extends JsonFormats {
 
       case GetFollowing =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/following/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":" + port + "/following/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>
@@ -278,7 +284,7 @@ object Project4Client extends JsonFormats {
 
       case GetMentions =>
         val pipeline: HttpRequest => Future[HttpResponse] = sendReceive
-        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":8080/mentions/" + id)
+        val request = HttpRequest(method = GET, uri = "http://" + ipAddress + ":" + port + "/mentions/" + id)
         val responseFuture: Future[HttpResponse] = pipeline(request)
         responseFuture onComplete {
           case Success(result) =>

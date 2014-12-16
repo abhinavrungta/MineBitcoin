@@ -45,8 +45,10 @@ object Project4Server {
     var recepientId = rid
   }
 
-  var tweetTPS = ArrayBuffer.empty[Int]
-  var ctr: AtomicInteger = new AtomicInteger()
+  var wTPS = ArrayBuffer.empty[Int]
+  var rdTPS = ArrayBuffer.empty[Int]
+  var wCtr: AtomicInteger = new AtomicInteger()
+  var rdCtr: AtomicInteger = new AtomicInteger()
 
   var users: CopyOnWriteArrayList[User] = new CopyOnWriteArrayList()
   var tweetStore: ConcurrentHashMap[String, Tweets] = new ConcurrentHashMap()
@@ -117,13 +119,16 @@ object Project4Server {
         System.gc()
 
       case Time =>
-        var tmp = ctr.get() - tweetTPS.sum
-        tweetTPS += (tmp)
-        println(tmp)
+        var tmp1 = wCtr.get() - wTPS.sum
+        wTPS += (tmp1)
+        var tmp2 = rdCtr.get() - rdTPS.sum
+        rdTPS += (tmp2)
+        println(tmp1 + " , " + tmp2)
 
       case Terminated(ref) =>
         if (ref == router) {
-          println(tweetTPS)
+          println(wTPS)
+          println(rdTPS)
           system.shutdown
         }
 
@@ -152,7 +157,7 @@ object Project4Server {
       case AddTweet(userId, time, msg) =>
         var regexMentions = "@[a-zA-Z0-9]+\\s*".r
         var regexTags = "#[a-zA-Z0-9]+\\s*".r
-        var tweetId = ctr.addAndGet(1).toString // generate tweetId.
+        var tweetId = wCtr.addAndGet(1).toString // generate tweetId.
         var tmp = new Tweets(tweetId, userId, msg, time)
 
         // extract mentions and store in tweet object
@@ -179,7 +184,7 @@ object Project4Server {
       case AddMsg(sId, time, msg, rId) =>
         var regexMentions = "@[a-zA-Z0-9]+\\s*".r
         var regexTags = "#[a-zA-Z0-9]+\\s*".r
-        var tweetId = ctr.addAndGet(1).toString // generate tweetId.
+        var tweetId = wCtr.addAndGet(1).toString // generate tweetId.
         var tmp = new Messages(rId, tweetId, sId, msg, time)
 
         // extract mentions and store in tweet object
@@ -201,6 +206,7 @@ object Project4Server {
         sender ! tweetId
 
       case SendMessages(userId) =>
+        rdCtr.addAndGet(1)
         var tweetIds = users.get(userId).messages
         var tmp: ArrayBuffer[Messages] = ArrayBuffer.empty
         var itr = tweetIds.iterator
@@ -210,6 +216,7 @@ object Project4Server {
         sender ! tmp.toList
 
       case SendHomeTimeline(userId) =>
+        rdCtr.addAndGet(1)
         var tweetIds = users.get(userId).homeTimeline
         var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
         var itr = tweetIds.iterator()
@@ -219,6 +226,7 @@ object Project4Server {
         sender ! tmp.toList
 
       case SendUserTimeline(userId) =>
+        rdCtr.addAndGet(1)
         var tweetIds = users.get(userId).userTimeline
         var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
         var itr = tweetIds.iterator()
@@ -228,6 +236,7 @@ object Project4Server {
         sender ! tmp.toList
 
       case SendFollowers(userId) =>
+        rdCtr.addAndGet(1)
         var idList = users.get(userId).followers
         var tmp: ArrayBuffer[sample] = ArrayBuffer.empty
         var itr = idList.iterator()
@@ -238,6 +247,7 @@ object Project4Server {
         sender ! tmp.toList
 
       case SendFollowing(userId) =>
+        rdCtr.addAndGet(1)
         var idList = users.get(userId).following
         var tmp: ArrayBuffer[sample] = ArrayBuffer.empty
         var itr = idList.iterator()
@@ -248,12 +258,14 @@ object Project4Server {
         sender ! tmp.toList
 
       case SendUserProfile(userId) =>
+        rdCtr.addAndGet(1)
         var obj = users.get(userId)
         var tmp: ArrayBuffer[sample] = ArrayBuffer.empty
         tmp += sample(obj.userId, obj.userName, obj.userTimeline.size(), obj.favorites.size(), obj.followers.size(), obj.following.size())
         sender ! tmp.toList
 
       case SendMentions(userId) =>
+        rdCtr.addAndGet(1)
         var mentionName = "@" + users.get(userId).userName
         var tmp: ArrayBuffer[Tweets] = ArrayBuffer.empty
         val itr = tweetStore.entrySet().iterator()
